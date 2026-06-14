@@ -1,4 +1,4 @@
-package com.example.pravaan_flutter
+package com.pravaan.pravaan_flutter
 
 import io.flutter.embedding.android.FlutterActivity
 
