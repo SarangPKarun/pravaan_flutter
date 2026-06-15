@@ -1,5 +1,7 @@
 # pravaan_flutter
 
+flutter run --dart-define-from-file=.env
+
 A new Flutter project.
 
 ## Getting Started
