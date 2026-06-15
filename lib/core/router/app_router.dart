@@ -9,7 +9,7 @@ import '../supabase_client.dart';
 
 class _AuthRouterNotifier extends ChangeNotifier {
   _AuthRouterNotifier(Ref ref) {
-    ref.listen(authStateProvider, (_, next) => notifyListeners());
+    ref.listen(authNotifierProvider, (_, __) => notifyListeners());
   }
 }
 

@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'secure_session_storage.dart';
+
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
@@ -10,7 +12,13 @@ abstract final class SupabaseClientService {
       _supabaseUrl.isNotEmpty && _supabaseAnonKey.isNotEmpty,
       'SUPABASE_URL and SUPABASE_ANON_KEY must be provided via --dart-define-from-file=.env',
     );
-    await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+    await Supabase.initialize(
+      url: _supabaseUrl,
+      anonKey: _supabaseAnonKey,
+      authOptions: const FlutterAuthClientOptions(
+        localStorage: SecureSessionStorage(),
+      ),
+    );
   }
 
   static SupabaseClient get client => Supabase.instance.client;

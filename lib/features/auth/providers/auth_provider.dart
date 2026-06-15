@@ -9,37 +9,55 @@ final authStateProvider = StreamProvider<AuthState>((ref) {
   return ref.watch(supabaseClientProvider).auth.onAuthStateChange;
 });
 
-class AuthNotifier extends AsyncNotifier<void> {
+class AuthNotifier extends AsyncNotifier<User?> {
   @override
-  FutureOr<void> build() {}
+  FutureOr<User?> build() {
+    ref.listen<AsyncValue<AuthState>>(authStateProvider, (_, next) {
+      next.whenData((s) => state = AsyncData(s.session?.user));
+    });
+    return ref.read(supabaseClientProvider).auth.currentUser;
+  }
 
   Future<void> signInWithEmailPassword(String email, String password) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => ref
+    state = await AsyncValue.guard(() async {
+      final res = await ref
           .read(supabaseClientProvider)
           .auth
-          .signInWithPassword(email: email, password: password),
-    );
+          .signInWithPassword(email: email, password: password);
+      return res.user;
+    });
+  }
+
+  Future<void> signUp(String email, String password) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      final res = await ref
+          .read(supabaseClientProvider)
+          .auth
+          .signUp(email: email, password: password);
+      return res.session?.user; // null if email confirmation required
+    });
   }
 
   Future<void> signInWithGoogle() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => ref
-          .read(supabaseClientProvider)
-          .auth
-          .signInWithOAuth(OAuthProvider.google),
-    );
+    // signInWithOAuth launches the browser and returns immediately.
+    // The user arrives via onAuthStateChange; the build() listener handles it.
+    await AsyncValue.guard<void>(() => ref
+        .read(supabaseClientProvider)
+        .auth
+        .signInWithOAuth(OAuthProvider.google));
   }
 
   Future<void> signOut() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => ref.read(supabaseClientProvider).auth.signOut(),
-    );
+    state = await AsyncValue.guard<User?>(() async {
+      await ref.read(supabaseClientProvider).auth.signOut();
+      return null;
+    });
   }
 }
 
 final authNotifierProvider =
-    AsyncNotifierProvider<AuthNotifier, void>(AuthNotifier.new);
+    AsyncNotifierProvider<AuthNotifier, User?>(AuthNotifier.new);

@@ -26,7 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<void>>(authNotifierProvider, (_, next) {
+    ref.listen<AsyncValue<User?>>(authNotifierProvider, (_, next) {
       if (next is AsyncError) {
         final msg = next.error is AuthException
             ? (next.error as AuthException).message
