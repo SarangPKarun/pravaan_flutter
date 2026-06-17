@@ -4,6 +4,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// razorpay:standard-core and razorpay:core both declare namespace 'com.razorpay',
+// which AGP 9.x rejects. standard-core's layout references resources that live
+// in core, so we exclude standard-core and keep core intact.
+configurations.all {
+    exclude(group = "com.razorpay", module = "standard-core")
+}
+
 android {
     namespace = "com.pravaan.pravaan_flutter"
     compileSdk = flutter.compileSdkVersion
