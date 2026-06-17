@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'core/supabase_client.dart';
-import 'core/theme/app_theme.dart';
+import 'core/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +21,6 @@ class MyApp extends ConsumerWidget {
     return MaterialApp.router(
       title: AppConstants.appName,
       theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
       routerConfig: router,
     );
   }
