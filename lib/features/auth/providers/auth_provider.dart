@@ -42,12 +42,16 @@ class AuthNotifier extends AsyncNotifier<User?> {
 
   Future<void> signInWithGoogle() async {
     state = const AsyncLoading();
-    // signInWithOAuth launches the browser and returns immediately.
-    // The user arrives via onAuthStateChange; the build() listener handles it.
+    // signInWithOAuth launches Chrome Custom Tabs and returns immediately.
+    // Android intercepts the redirect URI via the intent-filter in
+    // AndroidManifest.xml, which fires onAuthStateChange → build() listener.
     await AsyncValue.guard<void>(() => ref
         .read(supabaseClientProvider)
         .auth
-        .signInWithOAuth(OAuthProvider.google));
+        .signInWithOAuth(
+          OAuthProvider.google,
+          redirectTo: 'com.pravaan.pravaan_flutter://login-callback',
+        ));
   }
 
   Future<void> signOut() async {

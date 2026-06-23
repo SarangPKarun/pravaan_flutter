@@ -12,6 +12,7 @@ import '../../features/marketplace/screens/marketplace_screen.dart';
 import '../../features/onboarding/screens/onboarding_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/sos/screens/sos_screen.dart';
+import '../../features/splash/screens/splash_screen.dart';
 import '../../features/wallet/screens/wallet_screen.dart';
 import '../supabase_client.dart';
 import 'shell_scaffold.dart';
@@ -35,10 +36,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     refreshListenable: notifier,
-    initialLocation: '/login',
+    initialLocation: '/splash',
     redirect: (context, state) {
-      final isLoggedIn = client.auth.currentSession != null;
       final location = state.matchedLocation;
+
+      // Splash handles its own navigation — never redirect away from it.
+      if (location == '/splash') return null;
+
+      final isLoggedIn = client.auth.currentSession != null;
 
       if (!isLoggedIn) {
         return location == '/login' ? null : '/login';
@@ -56,6 +61,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingScreen()),
 
