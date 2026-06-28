@@ -1,0 +1,7 @@
+twilio - X17UALKKK239V1XQELQNMNCG
+
+
+e. Enable Test Mode (skip real SMS during development)
+Supabase Dashboard → Auth > Phone → scroll to Test OTPs
+Click Add test phone number → enter your dev phone (e.g. +919999999999) → set OTP to 123456
+During development, entering 123456 for that number skips the SMS and verifies instantly — zero cost

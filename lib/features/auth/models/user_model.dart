@@ -1,6 +1,6 @@
 class UserModel {
-  const UserModel({required this.id, required this.email});
+  const UserModel({required this.id, this.phone});
 
   final String id;
-  final String email;
+  final String? phone;
 }

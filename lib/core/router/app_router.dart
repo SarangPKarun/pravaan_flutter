@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/providers/auth_provider.dart';
-import '../../features/auth/screens/login_screen.dart';
+import '../../features/auth/screens/otp_screen.dart';
+import '../../features/auth/screens/phone_screen.dart';
 import '../../features/checkin/screens/checkin_screen.dart';
 import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/health/screens/health_screen.dart';
@@ -46,7 +47,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLoggedIn = client.auth.currentSession != null;
 
       if (!isLoggedIn) {
-        return location == '/login' ? null : '/login';
+        if (location == '/login' || location == '/otp') return null;
+        return '/login';
       }
 
       final isOnboarded =
@@ -62,7 +64,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
-      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      GoRoute(path: '/login', builder: (_, _) => const PhoneScreen()),
+      GoRoute(
+        path: '/otp',
+        builder: (_, state) => OtpScreen(phone: state.extra as String),
+      ),
       GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingScreen()),
 
       StatefulShellRoute.indexedStack(

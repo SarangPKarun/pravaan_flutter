@@ -18,40 +18,29 @@ class AuthNotifier extends AsyncNotifier<User?> {
     return ref.read(supabaseClientProvider).auth.currentUser;
   }
 
-  Future<void> signInWithEmailPassword(String email, String password) async {
+  /// Send OTP to [phone] in E.164 format (e.g. +919876543210).
+  /// State stays at its current value after success — user is not signed in
+  /// until [verifyOtp] completes.
+  Future<void> sendOtp(String phone) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final res = await ref
-          .read(supabaseClientProvider)
-          .auth
-          .signInWithPassword(email: email, password: password);
+    state = await AsyncValue.guard<User?>(() async {
+      await ref.read(supabaseClientProvider).auth.signInWithOtp(phone: phone);
+      return null; // not authenticated yet
+    });
+  }
+
+  /// Verify the 6-digit [token] received via SMS for [phone].
+  /// On success the auth state stream fires and [build] updates state.
+  Future<void> verifyOtp(String phone, String token) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard<User?>(() async {
+      final res = await ref.read(supabaseClientProvider).auth.verifyOTP(
+            phone: phone,
+            token: token,
+            type: OtpType.sms,
+          );
       return res.user;
     });
-  }
-
-  Future<void> signUp(String email, String password) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final res = await ref
-          .read(supabaseClientProvider)
-          .auth
-          .signUp(email: email, password: password);
-      return res.session?.user; // null if email confirmation required
-    });
-  }
-
-  Future<void> signInWithGoogle() async {
-    state = const AsyncLoading();
-    // signInWithOAuth launches Chrome Custom Tabs and returns immediately.
-    // Android intercepts the redirect URI via the intent-filter in
-    // AndroidManifest.xml, which fires onAuthStateChange → build() listener.
-    await AsyncValue.guard<void>(() => ref
-        .read(supabaseClientProvider)
-        .auth
-        .signInWithOAuth(
-          OAuthProvider.google,
-          redirectTo: 'com.pravaan.pravaan_flutter://login-callback',
-        ));
   }
 
   Future<void> signOut() async {
