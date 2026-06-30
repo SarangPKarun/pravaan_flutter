@@ -50,6 +50,16 @@ class AuthNotifier extends AsyncNotifier<User?> {
       return null;
     });
   }
+
+  Future<void> deleteAccount() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard<User?>(() async {
+      final client = ref.read(supabaseClientProvider);
+      await client.rpc('delete_user');
+      await client.auth.signOut();
+      return null;
+    });
+  }
 }
 
 final authNotifierProvider =

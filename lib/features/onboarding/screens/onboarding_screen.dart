@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme.dart';
@@ -43,31 +46,56 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   int _page = 0;
   bool _submitting = false;
 
-  // Step-2 cost controller kept outside the build so it doesn't reset
+  // Step-0 name controller
+  late final TextEditingController _nameCtrl;
+  // Step-2 cost controller
   late final TextEditingController _costCtrl;
 
   @override
   void initState() {
     super.initState();
-    final initCost = ref.read(onboardingProvider).unitCost;
-    _costCtrl = TextEditingController(text: initCost.toStringAsFixed(0));
+    final data = ref.read(onboardingProvider);
+    _nameCtrl = TextEditingController(text: data.fullName ?? '');
+    _costCtrl = TextEditingController(text: data.unitCost.toStringAsFixed(0));
   }
 
   @override
   void dispose() {
     _pageCtrl.dispose();
+    _nameCtrl.dispose();
     _costCtrl.dispose();
     super.dispose();
   }
 
+  static const int _totalSteps = 4;
+
   // ── Navigation helpers ──────────────────────────────────────────────────
   void _next() {
     final data = ref.read(onboardingProvider);
-    if (_page == 0 && data.habitType == null) {
+
+    if (_page == 0) {
+      final name = _nameCtrl.text.trim();
+      if (name.isEmpty) {
+        _snack('Please enter your full name.');
+        return;
+      }
+      if (data.dateOfBirth == null) {
+        _snack('Please select your date of birth.');
+        return;
+      }
+      if (data.gender == null) {
+        _snack('Please select your gender.');
+        return;
+      }
+      ref.read(onboardingProvider.notifier).setFullName(name);
+    }
+
+    if (_page == 1 && data.habitType == null) {
       _snack('Please pick a habit first.');
       return;
     }
-    if (_page == 1) {
+
+    if (_page == 2) {
       final cost = double.tryParse(_costCtrl.text.trim()) ?? 0;
       if (cost <= 0) {
         _snack('Enter a valid cost per unit.');
@@ -75,10 +103,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       }
       ref.read(onboardingProvider.notifier).setUnitCost(cost);
     }
-    if (_page == 2) {
+
+    if (_page == 3) {
       _complete();
       return;
     }
+
     setState(() => _page++);
     _pageCtrl.nextPage(
         duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
@@ -149,12 +179,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         child: Column(
           children: [
             _TopBar(page: _page, onBack: _page > 0 ? _back : null),
-            _ProgressBar(page: _page),
+            _ProgressBar(page: _page, total: _totalSteps),
             Expanded(
               child: PageView(
                 controller: _pageCtrl,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
+                  _Step0(data: data, nameCtrl: _nameCtrl),
                   _Step1(data: data),
                   _Step2(data: data, costCtrl: _costCtrl),
                   _Step3(data: data, fmt: fmt, onPickDate: _pickDate),
@@ -163,7 +194,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             ),
             _BottomBar(
               page: _page,
-              isLoading: _submitting,
+              total: _totalSteps,
+              isLoading: _submitting || data.isUploadingAvatar,
               onNext: _next,
             ),
           ],
@@ -196,7 +228,7 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 48),
           const Spacer(),
           Text(
-            'Step ${page + 1} of 3',
+            'Step ${page + 1} of 4',
             style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 13,
@@ -214,15 +246,16 @@ class _TopBar extends StatelessWidget {
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.page});
+  const _ProgressBar({required this.page, required this.total});
   final int page;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: (page + 1) / 3),
+        tween: Tween(begin: 0, end: (page + 1) / total),
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeInOut,
         builder: (_, value, _) => ClipRRect(
@@ -242,9 +275,14 @@ class _ProgressBar extends StatelessWidget {
 
 // ── Bottom bar ────────────────────────────────────────────────────────────────
 class _BottomBar extends StatelessWidget {
-  const _BottomBar(
-      {required this.page, required this.isLoading, required this.onNext});
+  const _BottomBar({
+    required this.page,
+    required this.total,
+    required this.isLoading,
+    required this.onNext,
+  });
   final int page;
+  final int total;
   final bool isLoading;
   final VoidCallback onNext;
 
@@ -254,9 +292,343 @@ class _BottomBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
       child: AppButton(
-        label: page == 2 ? "Let's Go 🚀" : 'Continue',
+        label: page == total - 1 ? "Let's Go 🚀" : 'Continue',
         isLoading: isLoading,
         onPressed: onNext,
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Step 0 — Personal details
+// ════════════════════════════════════════════════════════════════════════════
+class _Step0 extends ConsumerStatefulWidget {
+  const _Step0({required this.data, required this.nameCtrl});
+  final OnboardingData data;
+  final TextEditingController nameCtrl;
+
+  @override
+  ConsumerState<_Step0> createState() => _Step0State();
+}
+
+class _Step0State extends ConsumerState<_Step0> {
+  File? _localImage;
+
+  static const _genderOptions = [
+    ('male', 'Male'),
+    ('female', 'Female'),
+    ('other', 'Other'),
+    ('prefer_not_to_say', 'Prefer not to say'),
+  ];
+
+  Future<void> _pickImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.outlineVariant,
+                borderRadius: BorderRadius.circular(AppRadius.full),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded,
+                  color: AppColors.primary),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded,
+                  color: AppColors.primary),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 512,
+      maxHeight: 512,
+    );
+    if (picked == null) return;
+
+    setState(() => _localImage = File(picked.path));
+    try {
+      await ref
+          .read(onboardingProvider.notifier)
+          .uploadAvatar(File(picked.path));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Photo upload failed. You can add it later.'),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.all(16),
+        ));
+      }
+    }
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 25),
+      firstDate: DateTime(now.year - 100),
+      lastDate: DateTime(now.year - 13, now.month, now.day),
+      helpText: 'Select your date of birth',
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.primary),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      ref.read(onboardingProvider.notifier).setDateOfBirth(picked);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(onboardingProvider);
+    final dobChosen = data.dateOfBirth != null;
+    final dobFmt = dobChosen
+        ? DateFormat('d MMM yyyy').format(data.dateOfBirth!)
+        : null;
+
+    ImageProvider? avatarImage;
+    if (_localImage != null) {
+      avatarImage = FileImage(_localImage!);
+    } else if (data.avatarUrl != null) {
+      avatarImage = NetworkImage(data.avatarUrl!);
+    }
+
+    final initials = widget.nameCtrl.text.trim().isNotEmpty
+        ? widget.nameCtrl.text.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
+        : null;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Tell us about\nyourself 👋',
+              style: Theme.of(context).textTheme.headlineLarge),
+          const SizedBox(height: 6),
+          Text('We need these details for your wallet and health insights.',
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 28),
+
+          // ── Avatar picker ──────────────────────────────────────────────
+          Center(
+            child: GestureDetector(
+              onTap: _pickImage,
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 52,
+                    backgroundColor: AppColors.successTint,
+                    backgroundImage: avatarImage,
+                    child: avatarImage == null
+                        ? initials != null
+                            ? Text(
+                                initials,
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primary,
+                                ),
+                              )
+                            : const Icon(Icons.person_rounded,
+                                color: AppColors.primary, size: 40)
+                        : null,
+                  ),
+                  if (data.isUploadingAvatar)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black26,
+                        ),
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation(Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.camera_alt_rounded,
+                          color: Colors.white, size: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Center(
+            child: Text(
+              'Optional — add photo later',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Full name ──────────────────────────────────────────────────
+          _SectionCard(
+            title: 'Full name',
+            child: TextFormField(
+              controller: widget.nameCtrl,
+              keyboardType: TextInputType.name,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                hintText: 'Your full name',
+                prefixIcon: Icon(Icons.person_outline_rounded,
+                    color: AppColors.textSecondary, size: 20),
+              ),
+              onChanged: (_) => setState(() {}), // refresh initials
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Date of birth ──────────────────────────────────────────────
+          _SectionCard(
+            title: 'Date of birth',
+            child: GestureDetector(
+              onTap: _pickDob,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 14),
+                decoration: BoxDecoration(
+                  color: dobChosen ? AppColors.successTint : AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: dobChosen
+                        ? AppColors.primary
+                        : AppColors.outlineVariant,
+                    width: dobChosen ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cake_rounded,
+                      size: 20,
+                      color: dobChosen
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        dobChosen ? dobFmt! : 'Select date of birth',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 15,
+                          fontWeight: dobChosen
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: dobChosen
+                              ? AppColors.textPrimary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: dobChosen
+                          ? AppColors.primary
+                          : AppColors.outline,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Gender ─────────────────────────────────────────────────────
+          _SectionCard(
+            title: 'Gender',
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _genderOptions.map((opt) {
+                final selected = data.gender == opt.$1;
+                return GestureDetector(
+                  onTap: () => ref
+                      .read(onboardingProvider.notifier)
+                      .setGender(opt.$1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? AppColors.primary
+                          : Colors.white,
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.full),
+                      border: Border.all(
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.outlineVariant,
+                        width: selected ? 2 : 1,
+                      ),
+                    ),
+                    child: Text(
+                      opt.$2,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: selected
+                            ? Colors.white
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+        ],
       ),
     );
   }
