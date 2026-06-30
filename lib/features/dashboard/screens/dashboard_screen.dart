@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/widgets/streak_display.dart';
 import '../providers/dashboard_provider.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -41,7 +42,7 @@ class DashboardScreen extends ConsumerWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: _StreakCard(data: data)
+                      child: StreakDisplay(streak: data.daysClean)
                           .animate()
                           .fadeIn(delay: 200.ms, duration: 400.ms)
                           .slideY(begin: 0.2, end: 0, delay: 200.ms, duration: 400.ms),
@@ -237,80 +238,6 @@ class _MotivationalCard extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Streak card ───────────────────────────────────────────────────────────────
-class _StreakCard extends StatelessWidget {
-  const _StreakCard({required this.data});
-  final DashboardData data;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF004D38), AppColors.primary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.local_fire_department_rounded,
-                  color: Colors.orangeAccent, size: 20),
-              const SizedBox(width: 6),
-              const Text(
-                'Streak',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _AnimatedCounter(
-            value: data.daysClean,
-            style: const TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 44,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'days clean',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 12,
-              color: Colors.white60,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            data.streakEmoji,
-            style: const TextStyle(fontSize: 22),
           ),
         ],
       ),
@@ -582,19 +509,3 @@ class _DailyTipCard extends StatelessWidget {
   }
 }
 
-// ── Animated counter ──────────────────────────────────────────────────────────
-class _AnimatedCounter extends StatelessWidget {
-  const _AnimatedCounter({required this.value, required this.style});
-  final int value;
-  final TextStyle style;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<int>(
-      tween: IntTween(begin: 0, end: value),
-      duration: const Duration(milliseconds: 1000),
-      curve: Curves.easeOut,
-      builder: (_, v, _) => Text('$v', style: style),
-    );
-  }
-}
