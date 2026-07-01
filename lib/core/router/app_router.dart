@@ -14,7 +14,10 @@ import '../../features/onboarding/screens/onboarding_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/sos/screens/sos_screen.dart';
 import '../../features/splash/screens/splash_screen.dart';
-import '../../features/wallet/screens/wallet_screen.dart';
+import '../../features/wallet/screens/wallet_create_screen.dart';
+import '../../features/wallet/screens/wallet_detail_screen.dart';
+import '../../features/wallet/screens/wallet_early_withdrawal_screen.dart';
+import '../../features/wallet/screens/wallet_home_screen.dart';
 import '../supabase_client.dart';
 import 'shell_scaffold.dart';
 
@@ -89,7 +92,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/wallet',
-                builder: (_, _) => const WalletScreen(),
+                builder: (_, _) => const WalletHomeScreen(),
               ),
             ],
           ),
@@ -114,6 +117,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
+      GoRoute(
+        path: '/wallet/create',
+        builder: (_, state) => WalletCreateScreen(habitId: state.extra as String),
+      ),
+      GoRoute(
+        path: '/wallet/detail',
+        builder: (_, state) => WalletDetailScreen(habitId: state.extra as String),
+      ),
+      GoRoute(
+        path: '/wallet/early-withdraw',
+        builder: (_, state) =>
+            WalletEarlyWithdrawalScreen(habitId: state.extra as String),
+      ),
       GoRoute(path: '/checkin', builder: (_, _) => const CheckinScreen()),
       GoRoute(path: '/sos', builder: (_, _) => const SosScreen()),
       GoRoute(path: '/marketplace', builder: (_, _) => const MarketplaceScreen()),

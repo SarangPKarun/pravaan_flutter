@@ -53,6 +53,109 @@ create policy "Users can manage own stats"
   on public.user_stats for all
   using (auth.uid() = user_id);
 
+-- ── Goal wallets ──────────────────────────────────────────────────────────────
+
+create table public.goal_wallets (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid not null references auth.users(id) on delete cascade,
+  habit_id         uuid not null references public.habits(id) on delete cascade,
+  goal_name        text not null,
+  target_amount    float8 not null,
+  current_balance  float8 not null default 0,
+  target_date      timestamptz not null,
+  is_locked        boolean not null default true,
+  withdrawn_at      timestamptz,
+  created_at       timestamptz default now()
+);
+
+alter table public.goal_wallets enable row level security;
+
+create policy "Users can manage own goal wallets"
+  on public.goal_wallets for all
+  using (auth.uid() = user_id);
+
+-- ── Daily wallet credit (habit-clean-day → goal wallet) ─────────────────────────
+
+alter table public.goal_wallets
+  add column if not exists last_credited_date date;
+
+create table public.wallet_credits (
+  id          uuid primary key default gen_random_uuid(),
+  habit_id    uuid not null references public.habits(id) on delete cascade,
+  wallet_id   uuid not null references public.goal_wallets(id) on delete cascade,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  amount      float8 not null,
+  credit_date date not null,
+  created_at  timestamptz default now(),
+  unique (wallet_id, credit_date)
+);
+
+alter table public.wallet_credits enable row level security;
+
+create policy "Users can view own wallet credits"
+  on public.wallet_credits for select
+  using (auth.uid() = user_id);
+-- Deliberately no insert/update/delete policy — rows are only ever written by
+-- credit_habit_wallet(), which runs via the service-role Edge Function and bypasses RLS.
+
+create or replace function public.credit_habit_wallet(
+  p_habit_id uuid,
+  p_amount float8,
+  p_credit_date date
+) returns boolean
+language plpgsql
+as $$
+declare
+  v_wallet_id uuid;
+  v_user_id uuid;
+begin
+  update public.goal_wallets
+  set current_balance = current_balance + p_amount,
+      last_credited_date = p_credit_date
+  where habit_id = p_habit_id
+    and (last_credited_date is null or last_credited_date < p_credit_date)
+  returning id, user_id into v_wallet_id, v_user_id;
+
+  if v_wallet_id is null then
+    return false;
+  end if;
+
+  insert into public.wallet_credits (habit_id, wallet_id, user_id, amount, credit_date)
+  values (p_habit_id, v_wallet_id, v_user_id, p_amount, p_credit_date)
+  on conflict (wallet_id, credit_date) do nothing;
+
+  return true;
+end;
+$$;
+
+-- Prerequisite (run once, dashboard or SQL editor): enable "pg_cron" and "pg_net" extensions,
+-- and store the service-role key as a Vault secret named 'edge_function_service_role_key'.
+
+select cron.schedule(
+  'daily-wallet-credit',
+  '31 18 * * *', -- 00:01 IST == 18:31 UTC (previous day)
+  $$
+  select net.http_post(
+    url := '<YOUR_PROJECT_URL>/functions/v1/daily-wallet-credit',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'edge_function_service_role_key'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+
+-- ── Multi-wallet: enforce one wallet per habit ──────────────────────────────────
+
+alter table public.goal_wallets
+  add constraint goal_wallets_habit_id_unique unique (habit_id);
+
+-- ── Razorpay withdrawal demo: capture UPI ID at withdrawal time ─────────────────
+
+alter table public.goal_wallets
+  add column upi_id text;
+
 -- ── Migration for existing databases ─────────────────────────────────────────
 -- alter table public.checkins
 --   add column craving_trigger text check (craving_trigger in ('stress','boredom','social','other')),
