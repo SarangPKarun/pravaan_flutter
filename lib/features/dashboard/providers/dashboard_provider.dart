@@ -12,12 +12,17 @@ class DashboardData {
     required this.daysClean,
     required this.longestStreak,
     required this.totalCleanDays,
+    required this.dailyQty,
     required this.dailySavings,
     required this.quitDate,
   });
 
   final String displayName;
   final String habitType;
+
+  /// Units of the habit consumed per day (e.g. cigarettes/drinks per day),
+  /// used to compute units avoided over the current streak.
+  final int dailyQty;
 
   /// Current clean streak from streak_provider (Hive-backed, instant).
   final int daysClean;
@@ -91,6 +96,7 @@ final dashboardProvider = Provider<DashboardData>((ref) {
     daysClean: streak.currentStreak,
     longestStreak: streak.longestStreak,
     totalCleanDays: streak.totalCleanDays,
+    dailyQty: dailyQty,
     dailySavings: dailySavings,
     quitDate: quitDate,
   );

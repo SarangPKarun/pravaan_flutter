@@ -22,6 +22,13 @@ abstract class GoalWalletModel with _$GoalWalletModel {
   double get progressPercent =>
       targetAmount > 0 ? (currentBalance / targetAmount * 100).clamp(0, 100) : 0;
 
+  /// Days remaining until [targetDate], clamped at 0 (never negative) for
+  /// display purposes such as a dashboard "days to goal" highlight.
+  int get daysRemaining {
+    final days = targetDate.difference(DateTime.now()).inDays;
+    return days < 0 ? 0 : days;
+  }
+
   factory GoalWalletModel.fromJson(Map<String, dynamic> json) =>
       _$GoalWalletModelFromJson(json);
 }

@@ -156,6 +156,68 @@ alter table public.goal_wallets
 alter table public.goal_wallets
   add column upi_id text;
 
+-- ── AI dashboard messages (cache) ───────────────────────────────────────────────
+
+create table public.ai_messages (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  message      text not null,
+  generated_at timestamptz not null default now()
+);
+
+create index ai_messages_user_id_generated_at_idx
+  on public.ai_messages (user_id, generated_at desc);
+
+alter table public.ai_messages enable row level security;
+
+create policy "Users can manage own ai messages"
+  on public.ai_messages for all
+  using (auth.uid() = user_id);
+
+-- ── Realtime: live balance updates on the dashboard ─────────────────────────────
+-- Required for Supabase Realtime Postgres Changes to fire for this table at all —
+-- RLS alone does not enable Realtime; a table must also be added to this
+-- publication. Existing RLS policy ("Users can manage own goal wallets") already
+-- scopes which rows each subscribed user receives change events for.
+alter publication supabase_realtime add table public.goal_wallets;
+
+-- ── Device tokens (FCM push targets) ────────────────────────────────────────────
+
+create table public.device_tokens (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  token      text not null unique,
+  platform   text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.device_tokens enable row level security;
+
+create policy "Users can manage own device tokens"
+  on public.device_tokens for all
+  using (auth.uid() = user_id);
+
+-- ── Morning notification (personalized AI message push at 7 AM IST) ────────────
+-- Prerequisite: same pg_cron/pg_net/Vault setup as daily-wallet-credit above,
+-- plus the FIREBASE_SERVICE_ACCOUNT_JSON secret set on the Edge Function itself
+-- (supabase secrets set FIREBASE_SERVICE_ACCOUNT_JSON="$(cat serviceAccountKey.json)").
+
+select cron.schedule(
+  'morning-notification',
+  '30 1 * * *', -- 07:00 IST == 01:30 UTC
+  $$
+  select net.http_post(
+    url := '<YOUR_PROJECT_URL>/functions/v1/morning-notification',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'edge_function_service_role_key'),
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+
 -- ── Migration for existing databases ─────────────────────────────────────────
 -- alter table public.checkins
 --   add column craving_trigger text check (craving_trigger in ('stress','boredom','social','other')),

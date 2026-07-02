@@ -9,7 +9,7 @@ During development, entering 123456 for that number skips the SMS and verifies i
 
 
 
-day 31
+day 31, day 32, ( need to check )
 
 est & Deploy daily-wallet-credit
 Context
@@ -55,3 +55,16 @@ npx supabase functions deploy output confirms a successful upload (function vers
 
 
 3333=349697365479369745693765973645794394579
+
+
+phase 4 day 43-44
+
+I could not verify this runs — neither deno nor the supabase CLI is installed in this environment, so I couldn't run deno check, supabase functions serve, or exercise the actual test cases from the plan's verification section. Before deploying, you'll want to:
+
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase functions serve ai-dashboard-message --env-file ./supabase/.env.local and hit it with a real user JWT to confirm it behaves as expected (happy path, no-habit path, IDOR guard, unauthenticated)
+supabase functions deploy ai-dashboard-message
+Wiring the Flutter client to call this function (replacing dashboard_provider.dart's static motivationalMessage) is a natural next step but wasn't part of this task.
+
+
+Not verified here: actual chart rendering/legibility and whether the "day 3+" insight text reads correctly against real multi-day check-in data — needs a device run with several days of check-ins.

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase_client.dart';
+import '../../notifications/services/push_notification_service.dart';
 
 final authStateProvider = StreamProvider<AuthState>((ref) {
   return ref.watch(supabaseClientProvider).auth.onAuthStateChange;
@@ -39,6 +40,10 @@ class AuthNotifier extends AsyncNotifier<User?> {
             token: token,
             type: OtpType.sms,
           );
+      // Register this device's FCM token now that a session exists —
+      // main()'s registration runs before login, so a brand-new sign-in
+      // needs its own call.
+      await PushNotificationService.registerTokenForCurrentUser();
       return res.user;
     });
   }

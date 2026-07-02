@@ -77,6 +77,18 @@ class WalletRepository {
     }
   }
 
+  /// Live view of every goal wallet owned by [userId] — re-emits the full
+  /// list on any Realtime insert/update/delete via Supabase Postgres Changes
+  /// (e.g. when the daily-wallet-credit Edge Function credits a balance).
+  Stream<List<GoalWalletModel>> watchWallets(String userId) {
+    return _client
+        .from('goal_wallets')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', userId)
+        .order('created_at', ascending: false)
+        .map((rows) => rows.map(GoalWalletModel.fromJson).toList());
+  }
+
   Future<Result<double, String>> getBalance(
     String habitId,
     String userId,
