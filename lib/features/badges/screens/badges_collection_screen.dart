@@ -11,6 +11,17 @@ import '../providers/earned_badges_provider.dart';
 final _currencyFmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 final _dateFmt = DateFormat('d MMM yyyy');
 
+// Standard luminance-preserving grayscale matrix. Using ColorFilter.matrix
+// here (rather than BlendMode.saturation) avoids a Skia quirk where
+// non-separable HSL blend modes (saturation/hue/color/luminosity) composite
+// against the full canvas instead of clipping to the filtered widget.
+const List<double> _grayscaleMatrix = <double>[
+  0.2126, 0.7152, 0.0722, 0, 0,
+  0.2126, 0.7152, 0.0722, 0, 0,
+  0.2126, 0.7152, 0.0722, 0, 0,
+  0, 0, 0, 1, 0,
+];
+
 /// Picks the current progress toward [badge]'s threshold, as a 0..1
 /// fraction. Returns null for `custom`-trigger badges, which have no
 /// continuous stat to measure progress against.
@@ -118,7 +129,7 @@ class _BadgeTile extends StatelessWidget {
               isEarned
                   ? icon
                   : ColorFiltered(
-                      colorFilter: const ColorFilter.mode(Colors.grey, BlendMode.saturation),
+                      colorFilter: const ColorFilter.matrix(_grayscaleMatrix),
                       child: Opacity(opacity: 0.5, child: icon),
                     ),
               if (!isEarned)
