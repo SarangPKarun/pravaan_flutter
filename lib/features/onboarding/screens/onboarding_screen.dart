@@ -1,34 +1,34 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets/app_button.dart';
+import '../../habits/models/habit_model.dart';
 import '../providers/onboarding_provider.dart';
 
 // ── Habit catalogue ─────────────────────────────────────────────────────────
-const _habits = [
-  {'emoji': '🚬', 'label': 'Smoking',      'value': 'smoking',      'unit': 'cigarettes'},
-  {'emoji': '🍺', 'label': 'Alcohol',      'value': 'alcohol',      'unit': 'drinks'},
-  {'emoji': '💨', 'label': 'Vaping',       'value': 'vaping',       'unit': 'pods'},
-  {'emoji': '🍬', 'label': 'Sugar',        'value': 'sugar',        'unit': 'servings'},
-  {'emoji': '📱', 'label': 'Social Media', 'value': 'social_media', 'unit': 'sessions'},
-  {'emoji': '☕', 'label': 'Coffee',       'value': 'coffee',       'unit': 'cups'},
-  {'emoji': '🎰', 'label': 'Gambling',     'value': 'gambling',     'unit': 'bets'},
-  {'emoji': '🎮', 'label': 'Gaming',       'value': 'gaming',       'unit': 'hours'},
+typedef _HabitEntry = ({HabitType type, String emoji, String label, String unit});
+
+const _habitCatalogue = <_HabitEntry>[
+  (type: HabitType.cigarette, emoji: '🚬', label: 'Cigarette',  unit: 'cigarettes'),
+  (type: HabitType.alcohol,   emoji: '🍺', label: 'Alcohol',    unit: 'drinks'),
+  (type: HabitType.gutka,     emoji: '🟤', label: 'Tobacco',    unit: 'pieces'),
+  (type: HabitType.junkFood,  emoji: '🍔', label: 'Junk Food',  unit: 'servings'),
+  (type: HabitType.gambling,  emoji: '🎰', label: 'Gambling',   unit: 'sessions'),
+  (type: HabitType.custom,    emoji: '✏️',  label: 'Custom',     unit: 'units'),
 ];
 
-String _unitFor(String? habitType) =>
-    (_habits.firstWhere((h) => h['value'] == habitType,
-            orElse: () => {'unit': 'units'})['unit']) ??
-    'units';
+String _unitFor(HabitType? t) =>
+    _habitCatalogue.where((h) => h.type == t).firstOrNull?.unit ?? 'units';
 
-String _emojiFor(String? habitType) =>
-    (_habits.firstWhere((h) => h['value'] == habitType,
-            orElse: () => {'emoji': '🔥'})['emoji']) ??
-    '🔥';
+String _emojiFor(HabitType? t) =>
+    _habitCatalogue.where((h) => h.type == t).firstOrNull?.emoji ?? '🔥';
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -43,42 +43,73 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   int _page = 0;
   bool _submitting = false;
 
-  // Step-2 cost controller kept outside the build so it doesn't reset
-  late final TextEditingController _costCtrl;
+  // Step-0 name controller
+  late final TextEditingController _nameCtrl;
 
   @override
   void initState() {
     super.initState();
-    final initCost = ref.read(onboardingProvider).unitCost;
-    _costCtrl = TextEditingController(text: initCost.toStringAsFixed(0));
+    final data = ref.read(onboardingProvider);
+    _nameCtrl = TextEditingController(text: data.fullName ?? '');
   }
 
   @override
   void dispose() {
     _pageCtrl.dispose();
-    _costCtrl.dispose();
+    _nameCtrl.dispose();
     super.dispose();
   }
+
+  static const int _totalSteps = 4;
 
   // ── Navigation helpers ──────────────────────────────────────────────────
   void _next() {
     final data = ref.read(onboardingProvider);
-    if (_page == 0 && data.habitType == null) {
-      _snack('Please pick a habit first.');
-      return;
-    }
-    if (_page == 1) {
-      final cost = double.tryParse(_costCtrl.text.trim()) ?? 0;
-      if (cost <= 0) {
-        _snack('Enter a valid cost per unit.');
+
+    if (_page == 0) {
+      final name = _nameCtrl.text.trim();
+      if (name.isEmpty) {
+        _snack('Please enter your full name.');
         return;
       }
-      ref.read(onboardingProvider.notifier).setUnitCost(cost);
+      if (data.dateOfBirth == null) {
+        _snack('Please select your date of birth.');
+        return;
+      }
+      if (data.gender == null) {
+        _snack('Please select your gender.');
+        return;
+      }
+      ref.read(onboardingProvider.notifier).setFullName(name);
     }
+
+    if (_page == 1) {
+      if (data.habitTypes.isEmpty) {
+        _snack('Please pick at least one habit.');
+        return;
+      }
+      if (data.habitTypes.contains(HabitType.custom) &&
+          (data.customHabitName?.trim().isEmpty ?? true)) {
+        _snack('Please describe your custom habit.');
+        return;
+      }
+    }
+
     if (_page == 2) {
+      final hasZeroCost = data.habitTypes.any(
+        (t) => (data.habitDetails[t]?.unitCost ?? 0) <= 0,
+      );
+      if (hasZeroCost) {
+        _snack('Enter a cost for each habit.');
+        return;
+      }
+    }
+
+    if (_page == 3) {
       _complete();
       return;
     }
+
     setState(() => _page++);
     _pageCtrl.nextPage(
         duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
@@ -91,29 +122,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         duration: const Duration(milliseconds: 350), curve: Curves.easeInOut);
   }
 
-  Future<void> _pickDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: now,
-      lastDate: DateTime(now.year + 5),
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(primary: AppColors.primary),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      ref.read(onboardingProvider.notifier).setQuitDate(picked);
-    }
-  }
-
   Future<void> _complete() async {
     final data = ref.read(onboardingProvider);
-    if (data.quitDate == null) {
-      _snack('Please pick your quit date.');
+    if (data.goalTargetDate == null) {
+      _snack('Please pick a target date for your goal.');
       return;
     }
     setState(() => _submitting = true);
@@ -141,7 +153,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final data = ref.watch(onboardingProvider);
-    final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -149,21 +160,23 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         child: Column(
           children: [
             _TopBar(page: _page, onBack: _page > 0 ? _back : null),
-            _ProgressBar(page: _page),
+            _ProgressBar(page: _page, total: _totalSteps),
             Expanded(
               child: PageView(
                 controller: _pageCtrl,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
+                  _Step0(data: data, nameCtrl: _nameCtrl),
                   _Step1(data: data),
-                  _Step2(data: data, costCtrl: _costCtrl),
-                  _Step3(data: data, fmt: fmt, onPickDate: _pickDate),
+                  const _Step2(),
+                  const _Step3(),
                 ],
               ),
             ),
             _BottomBar(
               page: _page,
-              isLoading: _submitting,
+              total: _totalSteps,
+              isLoading: _submitting || data.isUploadingAvatar,
               onNext: _next,
             ),
           ],
@@ -196,7 +209,7 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 48),
           const Spacer(),
           Text(
-            'Step ${page + 1} of 3',
+            'Step ${page + 1} of 4',
             style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 13,
@@ -214,15 +227,16 @@ class _TopBar extends StatelessWidget {
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.page});
+  const _ProgressBar({required this.page, required this.total});
   final int page;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: (page + 1) / 3),
+        tween: Tween(begin: 0, end: (page + 1) / total),
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeInOut,
         builder: (_, value, _) => ClipRRect(
@@ -242,9 +256,14 @@ class _ProgressBar extends StatelessWidget {
 
 // ── Bottom bar ────────────────────────────────────────────────────────────────
 class _BottomBar extends StatelessWidget {
-  const _BottomBar(
-      {required this.page, required this.isLoading, required this.onNext});
+  const _BottomBar({
+    required this.page,
+    required this.total,
+    required this.isLoading,
+    required this.onNext,
+  });
   final int page;
+  final int total;
   final bool isLoading;
   final VoidCallback onNext;
 
@@ -254,7 +273,7 @@ class _BottomBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
       child: AppButton(
-        label: page == 2 ? "Let's Go 🚀" : 'Continue',
+        label: page == total - 1 ? 'Start my journey 🚀' : 'Continue',
         isLoading: isLoading,
         onPressed: onNext,
       ),
@@ -263,14 +282,373 @@ class _BottomBar extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Step 1 — Habit selector grid
+// Step 0 — Personal details
 // ════════════════════════════════════════════════════════════════════════════
-class _Step1 extends ConsumerWidget {
+class _Step0 extends ConsumerStatefulWidget {
+  const _Step0({required this.data, required this.nameCtrl});
+  final OnboardingData data;
+  final TextEditingController nameCtrl;
+
+  @override
+  ConsumerState<_Step0> createState() => _Step0State();
+}
+
+class _Step0State extends ConsumerState<_Step0> {
+  File? _localImage;
+
+  static const _genderOptions = [
+    ('male', 'Male'),
+    ('female', 'Female'),
+    ('other', 'Other'),
+    ('prefer_not_to_say', 'Prefer not to say'),
+  ];
+
+  Future<void> _pickImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.outlineVariant,
+                borderRadius: BorderRadius.circular(AppRadius.full),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded,
+                  color: AppColors.primary),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded,
+                  color: AppColors.primary),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 512,
+      maxHeight: 512,
+    );
+    if (picked == null) return;
+
+    setState(() => _localImage = File(picked.path));
+    try {
+      await ref
+          .read(onboardingProvider.notifier)
+          .uploadAvatar(File(picked.path));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Photo upload failed. You can add it later.'),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.all(16),
+        ));
+      }
+    }
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 25),
+      firstDate: DateTime(now.year - 100),
+      lastDate: DateTime(now.year - 13, now.month, now.day),
+      helpText: 'Select your date of birth',
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.primary),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      ref.read(onboardingProvider.notifier).setDateOfBirth(picked);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(onboardingProvider);
+    final dobChosen = data.dateOfBirth != null;
+    final dobFmt = dobChosen
+        ? DateFormat('d MMM yyyy').format(data.dateOfBirth!)
+        : null;
+
+    ImageProvider? avatarImage;
+    if (_localImage != null) {
+      avatarImage = FileImage(_localImage!);
+    } else if (data.avatarUrl != null) {
+      avatarImage = NetworkImage(data.avatarUrl!);
+    }
+
+    final initials = widget.nameCtrl.text.trim().isNotEmpty
+        ? widget.nameCtrl.text.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase()
+        : null;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Tell us about\nyourself 👋',
+              style: Theme.of(context).textTheme.headlineLarge),
+          const SizedBox(height: 6),
+          Text('We need these details for your wallet and health insights.',
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 28),
+
+          // ── Avatar picker ──────────────────────────────────────────────
+          Center(
+            child: GestureDetector(
+              onTap: _pickImage,
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 52,
+                    backgroundColor: AppColors.successTint,
+                    backgroundImage: avatarImage,
+                    child: avatarImage == null
+                        ? initials != null
+                            ? Text(
+                                initials,
+                                style: const TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primary,
+                                ),
+                              )
+                            : const Icon(Icons.person_rounded,
+                                color: AppColors.primary, size: 40)
+                        : null,
+                  ),
+                  if (data.isUploadingAvatar)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.black26,
+                        ),
+                        child: const Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation(Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.camera_alt_rounded,
+                          color: Colors.white, size: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Center(
+            child: Text(
+              'Optional — add photo later',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Full name ──────────────────────────────────────────────────
+          _SectionCard(
+            title: 'Full name',
+            child: TextFormField(
+              controller: widget.nameCtrl,
+              keyboardType: TextInputType.name,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                hintText: 'Your full name',
+                prefixIcon: Icon(Icons.person_outline_rounded,
+                    color: AppColors.textSecondary, size: 20),
+              ),
+              onChanged: (_) => setState(() {}), // refresh initials
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Date of birth ──────────────────────────────────────────────
+          _SectionCard(
+            title: 'Date of birth',
+            child: GestureDetector(
+              onTap: _pickDob,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 14),
+                decoration: BoxDecoration(
+                  color: dobChosen ? AppColors.successTint : AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: dobChosen
+                        ? AppColors.primary
+                        : AppColors.outlineVariant,
+                    width: dobChosen ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cake_rounded,
+                      size: 20,
+                      color: dobChosen
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        dobChosen ? dobFmt! : 'Select date of birth',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 15,
+                          fontWeight: dobChosen
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: dobChosen
+                              ? AppColors.textPrimary
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: dobChosen
+                          ? AppColors.primary
+                          : AppColors.outline,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Gender ─────────────────────────────────────────────────────
+          _SectionCard(
+            title: 'Gender',
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _genderOptions.map((opt) {
+                final selected = data.gender == opt.$1;
+                return GestureDetector(
+                  onTap: () => ref
+                      .read(onboardingProvider.notifier)
+                      .setGender(opt.$1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? AppColors.primary
+                          : Colors.white,
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.full),
+                      border: Border.all(
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.outlineVariant,
+                        width: selected ? 2 : 1,
+                      ),
+                    ),
+                    child: Text(
+                      opt.$2,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: selected
+                            ? Colors.white
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Step 1 — Habit selector grid (multi-select)
+// ════════════════════════════════════════════════════════════════════════════
+class _Step1 extends ConsumerStatefulWidget {
   const _Step1({required this.data});
   final OnboardingData data;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Step1> createState() => _Step1State();
+}
+
+class _Step1State extends ConsumerState<_Step1> {
+  late final TextEditingController _customCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _customCtrl = TextEditingController(
+      text: widget.data.customHabitName ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _customCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(onboardingProvider);
+    final notifier = ref.read(onboardingProvider.notifier);
+    final showCustomInput = data.habitTypes.contains(HabitType.custom);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
@@ -280,31 +658,58 @@ class _Step1 extends ConsumerWidget {
           Text('What are you\nquitting? 💪',
               style: Theme.of(context).textTheme.headlineLarge),
           const SizedBox(height: 8),
-          Text('Choose the habit you want to break free from.',
+          Text('Select all that apply.',
               style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 28),
           Expanded(
-            child: GridView.builder(
-              itemCount: _habits.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 1.15,
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _habitCatalogue.length,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
+                      childAspectRatio: 1.15,
+                    ),
+                    itemBuilder: (_, i) {
+                      final h = _habitCatalogue[i];
+                      final selected = data.habitTypes.contains(h.type);
+                      return _HabitTile(
+                        emoji: h.emoji,
+                        label: h.label,
+                        isSelected: selected,
+                        onTap: () => notifier.toggleHabitType(h.type),
+                      );
+                    },
+                  ),
+                  // Custom habit text input — shown when custom is selected
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: showCustomInput
+                        ? Padding(
+                            key: const ValueKey('custom-input'),
+                            padding: const EdgeInsets.only(top: 16),
+                            child: TextField(
+                              controller: _customCtrl,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: const InputDecoration(
+                                hintText: 'Describe your habit…',
+                                prefixIcon: Icon(Icons.edit_rounded,
+                                    color: AppColors.textSecondary, size: 20),
+                              ),
+                              onChanged: notifier.setCustomHabitName,
+                            ),
+                          )
+                        : const SizedBox.shrink(key: ValueKey('no-input')),
+                  ),
+                  const SizedBox(height: 24),
+                ],
               ),
-              itemBuilder: (_, i) {
-                final h = _habits[i];
-                final selected = data.habitType == h['value'];
-                return _HabitTile(
-                  emoji: h['emoji']!,
-                  label: h['label']!,
-                  value: h['value']!,
-                  isSelected: selected,
-                  onTap: () => ref
-                      .read(onboardingProvider.notifier)
-                      .setHabitType(h['value']!),
-                );
-              },
             ),
           ),
         ],
@@ -317,11 +722,10 @@ class _HabitTile extends StatelessWidget {
   const _HabitTile({
     required this.emoji,
     required this.label,
-    required this.value,
     required this.isSelected,
     required this.onTap,
   });
-  final String emoji, label, value;
+  final String emoji, label;
   final bool isSelected;
   final VoidCallback onTap;
 
@@ -372,36 +776,124 @@ class _HabitTile extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Step 2 — Quantity + cost
+// Step 2 — Per-habit quantity + cost
 // ════════════════════════════════════════════════════════════════════════════
-class _Step2 extends ConsumerWidget {
-  const _Step2({required this.data, required this.costCtrl});
-  final OnboardingData data;
+class _Step2 extends ConsumerStatefulWidget {
+  const _Step2();
+
+  @override
+  ConsumerState<_Step2> createState() => _Step2State();
+}
+
+class _Step2State extends ConsumerState<_Step2> {
+  // One controller per selected HabitType, keyed by type.
+  final Map<HabitType, TextEditingController> _costCtrls = {};
+
+  @override
+  void initState() {
+    super.initState();
+    final data = ref.read(onboardingProvider);
+    for (final type in data.habitTypes) {
+      final existing = data.habitDetails[type]?.unitCost ?? 0.0;
+      _costCtrls[type] = TextEditingController(
+        text: existing > 0 ? existing.toStringAsFixed(0) : '',
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final ctrl in _costCtrls.values) {
+      ctrl.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(onboardingProvider);
+    final fmt = NumberFormat.currency(
+        locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Your daily habits',
+              style: Theme.of(context).textTheme.headlineLarge),
+          const SizedBox(height: 6),
+          Text('Help us calculate how much you can save.',
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 28),
+
+          // One card per selected habit
+          for (final type in data.habitTypes) ...[
+            _HabitDetailCard(
+              type: type,
+              detail: data.habitDetails[type] ?? const HabitDetail(),
+              costCtrl: _costCtrls[type]!,
+              fmt: fmt,
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // Total row — only when multiple habits selected
+          if (data.habitTypes.length > 1 && data.dailySpend > 0) ...[
+            const SizedBox(height: 4),
+            _TotalSpendRow(totalSpend: data.dailySpend, fmt: fmt),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HabitDetailCard extends ConsumerWidget {
+  const _HabitDetailCard({
+    required this.type,
+    required this.detail,
+    required this.costCtrl,
+    required this.fmt,
+  });
+  final HabitType type;
+  final HabitDetail detail;
   final TextEditingController costCtrl;
+  final NumberFormat fmt;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(onboardingProvider.notifier);
-    final unit = _unitFor(data.habitType);
-    final emoji = _emojiFor(data.habitType);
-    final dailySpend = data.dailyQty * (double.tryParse(costCtrl.text) ?? data.unitCost);
+    final unit = _unitFor(type);
+    final emoji = _emojiFor(type);
+    final label = _habitCatalogue
+        .where((h) => h.type == type)
+        .firstOrNull
+        ?.label ?? type.name;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Habit reminder chip
+          // Habit pill header
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: AppColors.successTint,
               borderRadius: BorderRadius.circular(AppRadius.full),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+              border:
+                  Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
             ),
             child: Text(
-              '$emoji  ${data.habitType?.replaceAll('_', ' ') ?? ''}',
+              '$emoji  $label',
               style: const TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 13,
@@ -410,49 +902,122 @@ class _Step2 extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 20),
-          Text('Your daily habit', style: Theme.of(context).textTheme.headlineLarge),
-          const SizedBox(height: 6),
-          Text('Help us calculate how much you can save.',
-              style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 28),
+          const SizedBox(height: 16),
 
-          // ── Daily qty card ─────────────────────────────────────────────
-          _SectionCard(
-            title: 'How many $unit per day?',
-            child: _QtyStepperRow(
-              qty: data.dailyQty,
-              onDecrement: () => notifier.setDailyQty(data.dailyQty - 1),
-              onIncrement: () => notifier.setDailyQty(data.dailyQty + 1),
+          // Quantity stepper
+          Text(
+            'How many $unit per day?',
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textSecondary,
             ),
+          ),
+          const SizedBox(height: 10),
+          _QtyStepperRow(
+            qty: detail.dailyQty,
+            onDecrement: () => notifier.setHabitQty(type, detail.dailyQty - 1),
+            onIncrement: () => notifier.setHabitQty(type, detail.dailyQty + 1),
           ),
           const SizedBox(height: 16),
 
-          // ── Cost card ──────────────────────────────────────────────────
-          _SectionCard(
-            title: 'Cost per $unit (₹)',
-            child: TextFormField(
-              controller: costCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-              decoration: const InputDecoration(
-                prefixText: '₹ ',
-                hintText: '0',
-              ),
-              onChanged: (_) {
-                final v = double.tryParse(costCtrl.text.trim()) ?? 0;
-                notifier.setUnitCost(v);
-              },
+          // Cost field
+          Text(
+            'Cost per $unit (₹)',
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textSecondary,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 10),
+          TextField(
+            controller: costCtrl,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+            ],
+            decoration: const InputDecoration(
+              prefixText: '₹ ',
+              hintText: '0',
+            ),
+            onChanged: (v) {
+              final cost = double.tryParse(v.trim()) ?? 0;
+              notifier.setHabitCost(type, cost);
+            },
+          ),
 
-          // ── Auto-calculated summary ────────────────────────────────────
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            child: dailySpend > 0
-                ? _SpendSummary(dailySpend: dailySpend)
-                : const SizedBox.shrink(),
+          // Live daily spend
+          if (detail.dailySpend > 0) ...[
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Daily spend',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                Text(
+                  fmt.format(detail.dailySpend),
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TotalSpendRow extends StatelessWidget {
+  const _TotalSpendRow({required this.totalSpend, required this.fmt});
+  final double totalSpend;
+  final NumberFormat fmt;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.successTint,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border:
+            Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Total daily spend',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          Text(
+            fmt.format(totalSpend),
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+            ),
           ),
         ],
       ),
@@ -546,99 +1111,91 @@ class _StepBtn extends StatelessWidget {
   }
 }
 
-class _SpendSummary extends StatelessWidget {
-  const _SpendSummary({required this.dailySpend});
-  final double dailySpend;
+// ════════════════════════════════════════════════════════════════════════════
+// Step 3 — Goal + target date + projected savings
+// ════════════════════════════════════════════════════════════════════════════
+class _Step3 extends ConsumerStatefulWidget {
+  const _Step3();
 
   @override
-  Widget build(BuildContext context) {
-    final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF004D38), AppColors.primary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  ConsumerState<_Step3> createState() => _Step3State();
+}
+
+class _Step3State extends ConsumerState<_Step3> {
+  late final TextEditingController _goalCtrl;
+  final _fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+  final _dateFmt = DateFormat('d MMM yyyy');
+
+  @override
+  void initState() {
+    super.initState();
+    final data = ref.read(onboardingProvider);
+    _goalCtrl = TextEditingController(text: data.savingGoal ?? '');
+  }
+
+  @override
+  void dispose() {
+    _goalCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickTargetDate() async {
+    final now = DateTime.now();
+    final tomorrow = now.add(const Duration(days: 1));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(days: 30)),
+      firstDate: tomorrow,
+      lastDate: DateTime(now.year + 10),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.primary),
         ),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-      ),
-      child: Column(
-        children: [
-          const Text('💸  You currently spend',
-              style: TextStyle(color: Colors.white70, fontSize: 13)),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _AmountCol(label: 'per day', amount: fmt.format(dailySpend)),
-              _AmountCol(label: 'per month', amount: fmt.format(dailySpend * 30)),
-              _AmountCol(label: 'per year', amount: fmt.format(dailySpend * 365)),
-            ],
-          ),
-        ],
+        child: child!,
       ),
     );
+    if (picked != null) {
+      ref.read(onboardingProvider.notifier).setGoalTargetDate(picked);
+    }
   }
-}
-
-class _AmountCol extends StatelessWidget {
-  const _AmountCol({required this.label, required this.amount});
-  final String label, amount;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(amount,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'Inter')),
-        const SizedBox(height: 2),
-        Text(label,
-            style: const TextStyle(color: Colors.white60, fontSize: 11)),
-      ],
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Step 3 — Quit date + projected savings
-// ════════════════════════════════════════════════════════════════════════════
-class _Step3 extends StatelessWidget {
-  const _Step3(
-      {required this.data,
-      required this.fmt,
-      required this.onPickDate});
-  final OnboardingData data;
-  final NumberFormat fmt;
-  final VoidCallback onPickDate;
-
-  @override
-  Widget build(BuildContext context) {
-    final dateChosen = data.quitDate != null;
-    final dateFmt = dateChosen
-        ? DateFormat('EEEE, d MMMM yyyy').format(data.quitDate!)
-        : null;
+    final data = ref.watch(onboardingProvider);
+    final dateChosen = data.goalTargetDate != null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Set your quit date 📅',
+          Text('Set your goal 🎯',
               style: Theme.of(context).textTheme.headlineLarge),
           const SizedBox(height: 8),
-          Text('Pick the day you commit to breaking free.',
+          Text('What will you do with your savings?',
               style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 28),
 
-          // ── Date picker tile ─────────────────────────────────────────
+          // ── Goal name field ──────────────────────────────────────────
+          _SectionCard(
+            title: 'What are you saving for?',
+            child: TextField(
+              controller: _goalCtrl,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'e.g. New phone, Family trip',
+                prefixIcon: Icon(Icons.star_outline_rounded,
+                    color: AppColors.textSecondary, size: 20),
+              ),
+              onChanged: ref.read(onboardingProvider.notifier).setGoal,
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Target date tile ─────────────────────────────────────────
           GestureDetector(
-            onTap: onPickDate,
+            onTap: _pickTargetDate,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -669,7 +1226,7 @@ class _Step3 extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          dateChosen ? 'Quit date' : 'Choose your quit date',
+                          dateChosen ? 'Target date' : 'Choose your target date',
                           style: const TextStyle(
                             fontFamily: 'Inter',
                             fontSize: 12,
@@ -678,13 +1235,15 @@ class _Step3 extends StatelessWidget {
                         ),
                         if (dateChosen) ...[
                           const SizedBox(height: 2),
-                          Text(dateFmt!,
-                              style: const TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary,
-                              )),
+                          Text(
+                            _dateFmt.format(data.goalTargetDate!),
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -698,89 +1257,59 @@ class _Step3 extends StatelessWidget {
             ),
           ),
 
-          // ── Projected savings ─────────────────────────────────────────
-          if (dateChosen) ...[
-            const SizedBox(height: 24),
-            const Text(
-              'Your projected savings',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
+          // ── Projection card — fades in once target date is set ───────
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.08),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
               ),
             ),
-            const SizedBox(height: 12),
-            _SavingsCard(data: data, fmt: fmt),
-            const SizedBox(height: 16),
-            _YearCard(data: data, fmt: fmt),
-          ],
+            child: dateChosen
+                ? Padding(
+                    key: const ValueKey('projection'),
+                    padding: const EdgeInsets.only(top: 20),
+                    child: _GoalProjectionCard(
+                      goal: data.savingGoal,
+                      amount: data.savingsBy(data.goalTargetDate!),
+                      targetDate: data.goalTargetDate!,
+                      fmt: _fmt,
+                      dateFmt: _dateFmt,
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('no-projection')),
+          ),
         ],
       ),
     );
   }
 }
 
-class _SavingsCard extends StatelessWidget {
-  const _SavingsCard({required this.data, required this.fmt});
-  final OnboardingData data;
+class _GoalProjectionCard extends StatelessWidget {
+  const _GoalProjectionCard({
+    required this.goal,
+    required this.amount,
+    required this.targetDate,
+    required this.fmt,
+    required this.dateFmt,
+  });
+  final String? goal;
+  final double amount;
+  final DateTime targetDate;
   final NumberFormat fmt;
+  final DateFormat dateFmt;
 
   @override
   Widget build(BuildContext context) {
-    final milestones = [
-      ('1 week',   data.weeklySavings),
-      ('1 month',  data.monthlySavings),
-      ('6 months', data.sixMonthSavings),
-    ];
+    final goalLine = (goal != null && goal!.isNotEmpty)
+        ? 'Enough for $goal 🎉'
+        : 'That\'s real money back in your pocket. 🎉';
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.outlineVariant),
-      ),
-      child: Column(
-        children: [
-          for (int i = 0; i < milestones.length; i++) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md, vertical: 14),
-              child: Row(
-                children: [
-                  Text(milestones[i].$1,
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                        color: AppColors.textSecondary,
-                      )),
-                  const Spacer(),
-                  Text(fmt.format(milestones[i].$2),
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary,
-                      )),
-                ],
-              ),
-            ),
-            if (i < milestones.length - 1)
-              const Divider(height: 1, color: AppColors.outlineVariant),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _YearCard extends StatelessWidget {
-  const _YearCard({required this.data, required this.fmt});
-  final OnboardingData data;
-  final NumberFormat fmt;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -794,21 +1323,27 @@ class _YearCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Text('In one year you could save',
-              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          Text(
+            'By ${dateFmt.format(targetDate)} you could save',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
           const SizedBox(height: 8),
-          Text(fmt.format(data.yearlySavings),
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                letterSpacing: -1,
-              )),
+          Text(
+            fmt.format(amount),
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 36,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: -1,
+            ),
+          ),
           const SizedBox(height: 4),
-          const Text('That\'s real money back in your pocket. 🎉',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white60, fontSize: 12)),
+          Text(
+            goalLine,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white60, fontSize: 12),
+          ),
         ],
       ),
     );

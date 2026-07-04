@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "399362348323",
+    "project_id": "pravaan-project",
+    "storage_bucket": "pravaan-project.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:399362348323:android:0ece305868167b8ebaa896",
+        "android_client_info": {
+          "package_name": "com.pravaan.pravaan_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7vBn_NlN-cBB3dxLFNCwTd7TTSdUUtV0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -5,7 +5,27 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme.dart';
+import '../../../core/widgets/streak_display.dart';
+import '../../streak/providers/streak_provider.dart';
+import '../../wallet/models/goal_wallet_model.dart';
+import '../../wallet/providers/wallet_list_provider.dart';
+import '../providers/ai_dashboard_message_provider.dart';
 import '../providers/dashboard_provider.dart';
+
+/// Unit noun per habit type, mirroring the catalogue onboarding uses when a
+/// habit is first created (see `onboarding_screen.dart`'s `_habitCatalogue`).
+/// Kept as a separate lookup here since that catalogue is private to the
+/// onboarding screen and dashboard data only carries the raw type string.
+const _habitUnits = {
+  'cigarette': 'cigarettes',
+  'alcohol': 'drinks',
+  'gutka': 'pieces',
+  'junk_food': 'servings',
+  'gambling': 'sessions',
+  'custom': 'units',
+};
+
+String habitUnitLabel(String habitType) => _habitUnits[habitType] ?? 'units';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -13,6 +33,9 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final data = ref.watch(dashboardProvider);
+    final aiMessageAsync = ref.watch(aiDashboardMessageProvider);
+    final walletsAsync = ref.watch(userWalletsProvider);
+    final isCheckedInToday = ref.watch(isCheckedInTodayProvider);
     final fmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
     return Scaffold(
@@ -30,7 +53,13 @@ class DashboardScreen extends ConsumerWidget {
             sliver: SliverList.list(
               children: [
                 // ── Motivational AI card ───────────────────────────────
-                _MotivationalCard(message: data.motivationalMessage)
+                aiMessageAsync
+                    .when(
+                      loading: () => const _MotivationalCardShimmer(),
+                      error: (_, _) =>
+                          _MotivationalCard(message: data.motivationalMessage),
+                      data: (message) => _MotivationalCard(message: message),
+                    )
                     .animate()
                     .fadeIn(delay: 100.ms, duration: 400.ms)
                     .slideY(begin: 0.2, end: 0, delay: 100.ms, duration: 400.ms),
@@ -38,22 +67,60 @@ class DashboardScreen extends ConsumerWidget {
                 const SizedBox(height: 20),
 
                 // ── Streak + Savings row ───────────────────────────────
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StreakCard(data: data)
-                          .animate()
-                          .fadeIn(delay: 200.ms, duration: 400.ms)
-                          .slideY(begin: 0.2, end: 0, delay: 200.ms, duration: 400.ms),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: _SavingsCard(data: data, fmt: fmt)
-                          .animate()
-                          .fadeIn(delay: 300.ms, duration: 400.ms)
-                          .slideY(begin: 0.2, end: 0, delay: 300.ms, duration: 400.ms),
-                    ),
-                  ],
+                // IntrinsicHeight is required here: this Row sits directly
+                // inside a sliver list item, which gives it unbounded
+                // height, and `CrossAxisAlignment.stretch` needs a bounded
+                // height to stretch its children to — without it, layout
+                // throws "BoxConstraints forces an infinite height" and the
+                // whole CustomScrollView fails to paint (blank screen, no
+                // error UI, since it's a layout-phase exception).
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: StreakDisplay(streak: data.daysClean)
+                            .animate()
+                            .fadeIn(delay: 200.ms, duration: 400.ms)
+                            .slideY(begin: 0.2, end: 0, delay: 200.ms, duration: 400.ms),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: walletsAsync
+                            .when(
+                              loading: () => const _SavingsCardLoading(),
+                              error: (_, _) => const _SavingsCardEmpty(),
+                              data: (wallets) => wallets.isEmpty
+                                  ? const _SavingsCardEmpty()
+                                  : _SavingsCard(wallet: wallets.first, fmt: fmt),
+                            )
+                            .animate()
+                            .fadeIn(delay: 300.ms, duration: 400.ms)
+                            .slideY(begin: 0.2, end: 0, delay: 300.ms, duration: 400.ms),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Savings insight cards ───────────────────────────────
+                _SavingsInsightsRow(
+                  data: data,
+                  fmt: fmt,
+                  isCheckedInToday: isCheckedInToday,
+                  totalSaved: walletsAsync.maybeWhen(
+                    data: (wallets) =>
+                        wallets.isEmpty ? null : wallets.first.currentBalance,
+                    orElse: () => null,
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.push('/insights/savings'),
+                    child: const Text('View full insights →'),
+                  ),
                 ),
 
                 const SizedBox(height: 20),
@@ -61,16 +128,16 @@ class DashboardScreen extends ConsumerWidget {
                 // ── Quick actions ──────────────────────────────────────
                 _QuickActions()
                     .animate()
-                    .fadeIn(delay: 400.ms, duration: 400.ms)
-                    .slideY(begin: 0.2, end: 0, delay: 400.ms, duration: 400.ms),
+                    .fadeIn(delay: 500.ms, duration: 400.ms)
+                    .slideY(begin: 0.2, end: 0, delay: 500.ms, duration: 400.ms),
 
                 const SizedBox(height: 20),
 
                 // ── Daily tip card ─────────────────────────────────────
                 _DailyTipCard(data: data)
                     .animate()
-                    .fadeIn(delay: 500.ms, duration: 400.ms)
-                    .slideY(begin: 0.2, end: 0, delay: 500.ms, duration: 400.ms),
+                    .fadeIn(delay: 600.ms, duration: 400.ms)
+                    .slideY(begin: 0.2, end: 0, delay: 600.ms, duration: 400.ms),
               ],
             ),
           ),
@@ -244,84 +311,66 @@ class _MotivationalCard extends StatelessWidget {
   }
 }
 
-// ── Streak card ───────────────────────────────────────────────────────────────
-class _StreakCard extends StatelessWidget {
-  const _StreakCard({required this.data});
-  final DashboardData data;
+// ── Motivational card shimmer placeholder ───────────────────────────────────
+class _MotivationalCardShimmer extends StatelessWidget {
+  const _MotivationalCardShimmer();
 
   @override
   Widget build(BuildContext context) {
+    Widget bar(double width, double height) => Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+        );
+
     return Container(
+      margin: const EdgeInsets.only(top: AppSpacing.lg),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF004D38), AppColors.primary],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        border: Border.all(color: AppColors.outlineVariant),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.local_fire_department_rounded,
-                  color: Colors.orangeAccent, size: 20),
-              const SizedBox(width: 6),
-              const Text(
-                'Streak',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _AnimatedCounter(
-            value: data.daysClean,
-            style: const TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 44,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              height: 1,
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'days clean',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 12,
-              color: Colors.white60,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                bar(90, 10),
+                const SizedBox(height: 8),
+                bar(double.infinity, 12),
+                const SizedBox(height: 6),
+                bar(160, 12),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            data.streakEmoji,
-            style: const TextStyle(fontSize: 22),
           ),
         ],
       ),
-    );
+    ).animate(onPlay: (c) => c.repeat()).shimmer(
+          duration: 1200.ms,
+          color: AppColors.outlineVariant.withValues(alpha: 0.6),
+        );
   }
 }
 
 // ── Savings card ──────────────────────────────────────────────────────────────
 class _SavingsCard extends StatelessWidget {
-  const _SavingsCard({required this.data, required this.fmt});
-  final DashboardData data;
+  const _SavingsCard({required this.wallet, required this.fmt});
+  final GoalWalletModel wallet;
   final NumberFormat fmt;
 
   @override
@@ -367,7 +416,7 @@ class _SavingsCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: data.totalSaved),
+            tween: Tween(begin: 0, end: wallet.currentBalance),
             duration: const Duration(milliseconds: 1200),
             curve: Curves.easeOut,
             builder: (_, value, _) => Text(
@@ -383,7 +432,7 @@ class _SavingsCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${fmt.format(data.dailySavings)}/day',
+            '${wallet.daysRemaining} days to goal',
             style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 11,
@@ -394,7 +443,7 @@ class _SavingsCard extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(AppRadius.full),
             child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: _progress),
+              tween: Tween(begin: 0, end: wallet.progressPercent / 100),
               duration: const Duration(milliseconds: 1200),
               curve: Curves.easeOut,
               builder: (_, value, _) => LinearProgressIndicator(
@@ -407,9 +456,10 @@ class _SavingsCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'toward your goal',
-            style: TextStyle(
+          Text(
+            'toward "${wallet.goalName}"',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 10,
               color: AppColors.textSecondary,
@@ -419,11 +469,218 @@ class _SavingsCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  double get _progress {
-    final target = data.dailySavings * 365; // 1-year target
-    if (target <= 0) return 0;
-    return (data.totalSaved / target).clamp(0.0, 1.0);
+// ── Savings card: loading state ─────────────────────────────────────────────
+class _SavingsCardLoading extends StatelessWidget {
+  const _SavingsCardLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: const SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.5,
+          color: AppColors.primary,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Savings card: no goal wallet set up yet ─────────────────────────────────
+class _SavingsCardEmpty extends StatelessWidget {
+  const _SavingsCardEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('💰', style: TextStyle(fontSize: 20)),
+          SizedBox(height: 8),
+          Text(
+            'Set up a savings goal to start tracking your progress.',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Savings insight cards (horizontal scroll) ───────────────────────────────
+class _SavingsInsightsRow extends StatelessWidget {
+  const _SavingsInsightsRow({
+    required this.data,
+    required this.fmt,
+    required this.isCheckedInToday,
+    required this.totalSaved,
+  });
+
+  final DashboardData data;
+  final NumberFormat fmt;
+  final bool isCheckedInToday;
+
+  /// Real wallet balance (same figure shown in the Savings card above), or
+  /// null while it's loading/unavailable/no wallet exists yet.
+  final double? totalSaved;
+
+  // Illustrative reference prices (INR) for the "what could this buy" card —
+  // no such pricing exists elsewhere in the app.
+  static const _coffeePriceInr = 150;
+  static const _bookPriceInr = 400;
+
+  String _titleCase(String s) =>
+      s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+  @override
+  Widget build(BuildContext context) {
+    final savedToday = isCheckedInToday ? data.dailySavings : 0.0;
+    final total = totalSaved ?? 0.0;
+    final unitsAvoided = data.dailyQty * data.daysClean;
+    final coffees = (total / _coffeePriceInr).floor();
+    final books = (total / _bookPriceInr).floor();
+    final countFmt = NumberFormat.decimalPattern('en_IN');
+
+    final cards = [
+      _StatCard(
+        emoji: '📅',
+        label: 'Saved Today',
+        value: fmt.format(savedToday),
+        color: AppColors.primary,
+      ),
+      _StatCard(
+        emoji: '💰',
+        label: 'Total Saved',
+        value: fmt.format(total),
+        color: const Color(0xFFFFA000),
+      ),
+      _StatCard(
+        emoji: '🚫',
+        label: '${_titleCase(habitUnitLabel(data.habitType))} Avoided',
+        value: countFmt.format(unitsAvoided),
+        color: const Color(0xFF6A1B9A),
+      ),
+      _StatCard(
+        emoji: '🎁',
+        label: 'Treat Yourself',
+        value: '≈ $coffees ☕ or $books 📚',
+        color: const Color(0xFF00838F),
+      ),
+    ];
+
+    return SizedBox(
+      height: 120,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
+        itemCount: cards.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (_, i) => cards[i]
+            .animate()
+            .fadeIn(delay: (400 + i * 80).ms, duration: 400.ms)
+            .slideY(
+              begin: 0.2,
+              end: 0,
+              delay: (400 + i * 80).ms,
+              duration: 400.ms,
+            ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.emoji,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String emoji;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 150,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: Text(emoji, style: const TextStyle(fontSize: 14)),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -452,6 +709,16 @@ class _QuickActions extends StatelessWidget {
             subtitle: 'Craving? Get help now',
             color: const Color(0xFFB71C1C),
             onTap: () => context.push('/sos'),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: _ActionButton(
+            emoji: '👛',
+            label: 'Wallet',
+            subtitle: 'View your savings',
+            color: const Color(0xFF1565C0),
+            onTap: () => context.push('/wallet'),
           ),
         ),
       ],
@@ -582,19 +849,3 @@ class _DailyTipCard extends StatelessWidget {
   }
 }
 
-// ── Animated counter ──────────────────────────────────────────────────────────
-class _AnimatedCounter extends StatelessWidget {
-  const _AnimatedCounter({required this.value, required this.style});
-  final int value;
-  final TextStyle style;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<int>(
-      tween: IntTween(begin: 0, end: value),
-      duration: const Duration(milliseconds: 1000),
-      curve: Curves.easeOut,
-      builder: (_, v, _) => Text('$v', style: style),
-    );
-  }
-}

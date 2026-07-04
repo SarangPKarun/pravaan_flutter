@@ -5,3 +5,66 @@ e. Enable Test Mode (skip real SMS during development)
 Supabase Dashboard → Auth > Phone → scroll to Test OTPs
 Click Add test phone number → enter your dev phone (e.g. +919999999999) → set OTP to 123456
 During development, entering 123456 for that number skips the SMS and verifies instantly — zero cost
+
+
+
+
+day 31, day 32, ( need to check )
+
+est & Deploy daily-wallet-credit
+Context
+daily-wallet-credit (index.ts) was written but never run. There is only one Supabase project (ymoalikzfqavfcyczpvp, from .env) — no separate dev/staging project exists. The function processes every active habit with no per-user scoping, so invoking it against the remote project would immediately mutate real users' goal_wallets.current_balance. Testing must happen against a disposable local Supabase stack (Docker, already installed and running) instead — this is the standard Supabase CLI workflow (supabase start) and the only way to verify correctness/idempotency without touching real user data. Deployment (uploading the function code) is separate from execution — deploying doesn't run it; it only becomes live once the pg_cron job or a manual call triggers it.
+
+Tooling note: the Supabase CLI isn't installed globally but is available via npx supabase@2.109.0. No supabase/config.toml exists yet, so supabase init runs first.
+
+Blocker to flag now: deploying to the real project requires CLI authentication. No cached Supabase CLI credentials exist on this machine (~/.supabase has no token) and SUPABASE_ACCESS_TOKEN isn't set. Local testing doesn't need this — it's only required for the final supabase link + supabase functions deploy step. If not already logged in, you'll need to run npx supabase login yourself in a terminal (interactive browser auth I can't perform) before the deploy step can proceed.
+
+Plan
+1. Local stack setup
+npx supabase init (scaffolds config.toml; existing supabase/functions/ is picked up automatically).
+npx supabase start — brings up local Postgres/Auth/Edge Runtime in Docker. Note the printed local API URL, anon key, and DB connection string from npx supabase status.
+Apply the schema to the local DB: run supa.sql (habits, checkins, user_stats, goal_wallets, credit_habit_wallet function, last_credited_date column — the pg_cron block at the bottom will simply no-op/error harmlessly locally since pg_cron/pg_net/Vault aren't relevant locally; that block can be skipped when applying locally, or left — it's idempotent-safe to skip for this test) against the local Postgres instance via psql.
+2. Seed fixture data
+Create supabase/seed.sql (also useful going forward for local dev, not just this test) with:
+
+A test row in auth.users (minimal columns: id, aud, role, email, encrypted_password, instance_id='00000000-0000-0000-0000-000000000000', timestamps) — required because habits/checkins/goal_wallets all FK to auth.users(id).
+One active habit (daily_units = 5, cost_per_unit = 15 → expected credit 75).
+One clean check-in dated inside the IST day the function will treat as "yesterday" at test time — computed relatively in SQL (e.g. ((now() at time zone 'Asia/Kolkata')::date - 1 + time '12:00') at time zone 'Asia/Kolkata') rather than a hardcoded date, so the seed stays correct regardless of when the test actually runs.
+One goal_wallets row for that habit (current_balance = 0, is_locked = true, last_credited_date = null).
+3. Manual invocation — verify balance increments
+npx supabase functions serve daily-wallet-credit (local CLI auto-injects local SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY into the function — no manual secret wiring needed).
+curl -i --request POST 'http://127.0.0.1:54321/functions/v1/daily-wallet-credit' -H "Authorization: Bearer <local anon key>".
+Inspect the JSON response (credited, skipped, errors) and query goal_wallets before/after via psql — confirm current_balance increased by exactly 75 and last_credited_date is set to the expected date.
+4. Idempotency check
+Call the same curl command again immediately.
+Confirm the JSON response now shows credited: 0, skipped: 1, and current_balance in the DB is unchanged from step 3 — proves credit_habit_wallet's guarded UPDATE correctly no-ops on a repeat call for the same day.
+5. Tear down local stack
+npx supabase stop once both checks pass.
+6. Deploy to the real project
+Only after local tests pass, and only if CLI auth is available (see blocker above):
+
+npx supabase link --project-ref ymoalikzfqavfcyczpvp
+npx supabase functions deploy daily-wallet-credit
+Explicitly out of scope for this task: invoking the deployed function against the real project's data. That only happens later via the already-configured pg_cron schedule (supa.sql), or if you separately choose to trigger it manually — deploying and executing are kept as distinct, deliberate steps given the no-staging-environment constraint.
+
+Verification
+Local curl response and psql balance query from steps 3–4 are the actual test evidence (pasted into the conversation, not just "ran without error").
+npx supabase functions deploy output confirms a successful upload (function version/URL), without any accompanying invocation against remote data.
+
+
+
+
+3333=349697365479369745693765973645794394579
+
+
+phase 4 day 43-44
+
+I could not verify this runs — neither deno nor the supabase CLI is installed in this environment, so I couldn't run deno check, supabase functions serve, or exercise the actual test cases from the plan's verification section. Before deploying, you'll want to:
+
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+supabase functions serve ai-dashboard-message --env-file ./supabase/.env.local and hit it with a real user JWT to confirm it behaves as expected (happy path, no-habit path, IDOR guard, unauthenticated)
+supabase functions deploy ai-dashboard-message
+Wiring the Flutter client to call this function (replacing dashboard_provider.dart's static motivationalMessage) is a natural next step but wasn't part of this task.
+
+
+Not verified here: actual chart rendering/legibility and whether the "day 3+" insight text reads correctly against real multi-day check-in data — needs a device run with several days of check-ins.
