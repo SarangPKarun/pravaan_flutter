@@ -67,30 +67,39 @@ class DashboardScreen extends ConsumerWidget {
                 const SizedBox(height: 20),
 
                 // ── Streak + Savings row ───────────────────────────────
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: StreakDisplay(streak: data.daysClean)
-                          .animate()
-                          .fadeIn(delay: 200.ms, duration: 400.ms)
-                          .slideY(begin: 0.2, end: 0, delay: 200.ms, duration: 400.ms),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: walletsAsync
-                          .when(
-                            loading: () => const _SavingsCardLoading(),
-                            error: (_, _) => const _SavingsCardEmpty(),
-                            data: (wallets) => wallets.isEmpty
-                                ? const _SavingsCardEmpty()
-                                : _SavingsCard(wallet: wallets.first, fmt: fmt),
-                          )
-                          .animate()
-                          .fadeIn(delay: 300.ms, duration: 400.ms)
-                          .slideY(begin: 0.2, end: 0, delay: 300.ms, duration: 400.ms),
-                    ),
-                  ],
+                // IntrinsicHeight is required here: this Row sits directly
+                // inside a sliver list item, which gives it unbounded
+                // height, and `CrossAxisAlignment.stretch` needs a bounded
+                // height to stretch its children to — without it, layout
+                // throws "BoxConstraints forces an infinite height" and the
+                // whole CustomScrollView fails to paint (blank screen, no
+                // error UI, since it's a layout-phase exception).
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: StreakDisplay(streak: data.daysClean)
+                            .animate()
+                            .fadeIn(delay: 200.ms, duration: 400.ms)
+                            .slideY(begin: 0.2, end: 0, delay: 200.ms, duration: 400.ms),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: walletsAsync
+                            .when(
+                              loading: () => const _SavingsCardLoading(),
+                              error: (_, _) => const _SavingsCardEmpty(),
+                              data: (wallets) => wallets.isEmpty
+                                  ? const _SavingsCardEmpty()
+                                  : _SavingsCard(wallet: wallets.first, fmt: fmt),
+                            )
+                            .animate()
+                            .fadeIn(delay: 300.ms, duration: 400.ms)
+                            .slideY(begin: 0.2, end: 0, delay: 300.ms, duration: 400.ms),
+                      ),
+                    ],
+                  ),
                 ),
 
                 const SizedBox(height: 20),
@@ -583,7 +592,7 @@ class _SavingsInsightsRow extends StatelessWidget {
     ];
 
     return SizedBox(
-      height: 112,
+      height: 120,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,

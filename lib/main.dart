@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,16 +18,31 @@ import 'features/streak/providers/streak_provider.dart';
 import 'features/wallet/providers/wallet_list_provider.dart';
 import 'firebase_options.dart';
 
+void _logUncaughtError(Object error, StackTrace stack) {
+  debugPrint('!!! UNCAUGHT ERROR !!! $error\n$stack');
+}
+
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await HiveService.initialize();
-  await SupabaseClientService.initialize();
-  await PushNotificationService.requestPermission();
-  await PushNotificationService.registerTokenForCurrentUser();
-  PushNotificationService.listenForTokenRefresh();
-  await LocalNotificationService.initialize();
-  runApp(const ProviderScope(child: MyApp()));
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    _logUncaughtError(details.exception, details.stack ?? StackTrace.empty);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _logUncaughtError(error, stack);
+    return true;
+  };
+
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await HiveService.initialize();
+    await SupabaseClientService.initialize();
+    await PushNotificationService.requestPermission();
+    await PushNotificationService.registerTokenForCurrentUser();
+    PushNotificationService.listenForTokenRefresh();
+    await LocalNotificationService.initialize();
+    runApp(const ProviderScope(child: MyApp()));
+  }, _logUncaughtError);
 }
 
 class MyApp extends ConsumerWidget {
