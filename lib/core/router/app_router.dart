@@ -5,12 +5,21 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/screens/otp_screen.dart';
 import '../../features/auth/screens/phone_screen.dart';
+import '../../features/badges/screens/badge_celebration_screen.dart';
+import '../../features/badges/screens/badges_collection_screen.dart';
 import '../../features/checkin/screens/checkin_screen.dart';
+import '../../features/community/screens/community_screen.dart';
 import '../../features/dashboard/screens/dashboard_screen.dart';
 import '../../features/health/screens/health_screen.dart';
 import '../../features/insights/screens/insights_screen.dart';
+import '../../features/insights/screens/savings_insights_screen.dart';
+import '../../features/marketplace/models/product_model.dart';
 import '../../features/marketplace/screens/marketplace_screen.dart';
+import '../../features/marketplace/screens/product_detail_screen.dart';
+import '../../features/marketplace/screens/purchase_success_screen.dart';
 import '../../features/onboarding/screens/onboarding_screen.dart';
+import '../../features/profile/screens/edit_habits_screen.dart';
+import '../../features/profile/screens/notification_preferences_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/sos/screens/sos_screen.dart';
 import '../../features/splash/screens/splash_screen.dart';
@@ -18,6 +27,7 @@ import '../../features/wallet/screens/wallet_create_screen.dart';
 import '../../features/wallet/screens/wallet_detail_screen.dart';
 import '../../features/wallet/screens/wallet_early_withdrawal_screen.dart';
 import '../../features/wallet/screens/wallet_home_screen.dart';
+import '../badges.dart';
 import '../supabase_client.dart';
 import 'shell_scaffold.dart';
 
@@ -131,9 +141,32 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             WalletEarlyWithdrawalScreen(habitId: state.extra as String),
       ),
       GoRoute(path: '/checkin', builder: (_, _) => const CheckinScreen()),
+      GoRoute(
+        path: '/badge-celebration',
+        builder: (_, state) => BadgeCelebrationScreen(badge: state.extra as BadgeModel),
+      ),
+      GoRoute(path: '/badges', builder: (_, _) => const BadgesCollectionScreen()),
+      GoRoute(path: '/community', builder: (_, _) => const CommunityScreen()),
+      GoRoute(
+        path: '/notification-preferences',
+        builder: (_, _) => const NotificationPreferencesScreen(),
+      ),
+      GoRoute(path: '/edit-habits', builder: (_, _) => const EditHabitsScreen()),
       GoRoute(path: '/sos', builder: (_, _) => const SosScreen()),
       GoRoute(path: '/marketplace', builder: (_, _) => const MarketplaceScreen()),
+      GoRoute(
+        path: '/marketplace/product',
+        builder: (_, state) => ProductDetailScreen(product: state.extra as ProductModel),
+      ),
+      GoRoute(
+        path: '/marketplace/purchase-success',
+        builder: (_, state) => PurchaseSuccessScreen(product: state.extra as ProductModel),
+      ),
       GoRoute(path: '/insights', builder: (_, _) => const InsightsScreen()),
+      GoRoute(
+        path: '/insights/savings',
+        builder: (_, _) => const SavingsInsightsScreen(),
+      ),
     ],
   );
 });

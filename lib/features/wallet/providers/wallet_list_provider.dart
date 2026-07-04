@@ -13,3 +13,11 @@ final userWalletsProvider = StreamProvider<List<GoalWalletModel>>((ref) {
 
   return ref.watch(walletRepositoryProvider).watchWallets(userId);
 });
+
+/// Sum of `currentBalance` across all of the user's goal wallets — there's
+/// no single aggregate column server-side since `goal_wallets` is one row
+/// per habit.
+final totalSavingsProvider = Provider<double>((ref) {
+  final wallets = ref.watch(userWalletsProvider).value ?? const [];
+  return wallets.fold<double>(0, (sum, w) => sum + w.currentBalance);
+});

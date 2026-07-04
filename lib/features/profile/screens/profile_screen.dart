@@ -1,24 +1,22 @@
+import 'dart:ui' as ui;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme.dart';
 import '../../../core/widgets/app_button.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../badges/providers/earned_badges_provider.dart';
+import '../../habits/models/habit_model.dart';
+import '../../wallet/providers/wallet_list_provider.dart';
+import '../habit_display.dart';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const _habitEmoji = {
-  'smoking': '🚬',
-  'alcohol': '🍺',
-  'vaping': '💨',
-  'sugar': '🍬',
-  'social_media': '📱',
-  'coffee': '☕',
-  'gambling': '🎰',
-  'gaming': '🎮',
-};
 
 const _genderLabel = {
   'male': 'Male',
@@ -27,6 +25,9 @@ const _genderLabel = {
   'prefer_not_to_say': 'Prefer not to say',
 };
 
+final _currencyFmt = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+final _dateFmt = DateFormat('d MMM yyyy');
+
 String _maskPhone(String? phone) {
   if (phone == null || phone.length < 5) return phone ?? '—';
   final last4 = phone.substring(phone.length - 4);
@@ -34,12 +35,88 @@ String _maskPhone(String? phone) {
   return '${prefix.isEmpty ? '' : '$prefix '}••••••$last4';
 }
 
+int _ageFrom(DateTime dob) {
+  final now = DateTime.now();
+  int age = now.year - dob.year;
+  if (now.month < dob.month || (now.month == dob.month && now.day < dob.day)) {
+    age--;
+  }
+  return age;
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  final _shareCardKey = GlobalKey();
+  final _shareButtonKey = GlobalKey();
+
+  Future<void> _shareSummary() async {
+    try {
+      final boundary =
+          _shareCardKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      final image = await boundary?.toImage(pixelRatio: 3.0);
+      final byteData = await image?.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+
+      final bytes = byteData.buffer.asUint8List();
+      final buttonBox =
+          _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final origin = buttonBox != null
+          ? buttonBox.localToGlobal(Offset.zero) & buttonBox.size
+          : null;
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'image/png', name: 'pravaan_summary.png')],
+          text: 'My Pravaan journey so far! 🌱',
+          sharePositionOrigin: origin,
+        ),
+      );
+    } catch (_) {
+      // Sharing is best-effort — a failure here shouldn't break the profile screen.
+    }
+  }
+
+  void _confirmDelete(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.xl)),
+        title: const Text(
+          'Delete your account?',
+          style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18),
+        ),
+        content: const Text(
+          'This permanently deletes your account and all your data. This cannot be undone.',
+          style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              ref.read(authNotifierProvider.notifier).deleteAccount();
+            },
+            child: const Text('Delete',
+                style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authAsync = ref.watch(authNotifierProvider);
     final user = authAsync.asData?.value;
     final meta = user?.userMetadata ?? {};
@@ -50,32 +127,29 @@ class ProfileScreen extends ConsumerWidget {
     final String? dobRaw = meta['date_of_birth'] as String?;
     final DateTime? dob = dobRaw != null ? DateTime.tryParse(dobRaw) : null;
     final String? gender = meta['gender'] as String?;
-    final String? habitType = meta['habit_type'] as String?;
-    final int? dailyQty = (meta['daily_qty'] as num?)?.toInt();
-    final double? unitCost = (meta['unit_cost'] as num?)?.toDouble();
+
+    final List<HabitType> habitTypes = parseHabitTypes(meta['habit_types']);
+    final Map<HabitType, HabitDetail> habitDetails = parseHabitDetails(meta['habit_details']);
     final String? quitDateRaw = meta['quit_date'] as String?;
-    final DateTime? quitDate =
-        quitDateRaw != null ? DateTime.tryParse(quitDateRaw) : null;
+    final DateTime? quitDate = quitDateRaw != null ? DateTime.tryParse(quitDateRaw) : null;
+    final int? daysQuit =
+        quitDate != null ? DateTime.now().difference(quitDate).inDays : null;
+    final double totalDailySpend = habitTypes.fold(0.0, (sum, type) {
+      final detail = habitDetails[type];
+      return sum + (detail != null ? detail.dailyQty * detail.unitCost : 0.0);
+    });
+
+    final DateTime? joinedDate =
+        user?.createdAt != null ? DateTime.tryParse(user!.createdAt) : null;
+
+    final earnedBadgeCount = ref.watch(earnedBadgesProvider).value?.length ?? 0;
+    final totalSaved = ref.watch(totalSavingsProvider);
 
     final initials = fullName != null && fullName.isNotEmpty
-        ? fullName
-            .split(' ')
-            .map((w) => w.isNotEmpty ? w[0] : '')
-            .take(2)
-            .join()
-            .toUpperCase()
+        ? fullName.split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase()
         : '?';
 
-    final int? age = dob != null
-        ? _ageFrom(dob)
-        : null;
-
-    final int? daysQuit = quitDate != null
-        ? DateTime.now().difference(quitDate).inDays
-        : null;
-
-    final double? dailySpend =
-        (dailyQty != null && unitCost != null) ? dailyQty * unitCost : null;
+    final int? age = dob != null ? _ageFrom(dob) : null;
 
     final isLoading = authAsync.isLoading;
 
@@ -94,10 +168,32 @@ class ProfileScreen extends ConsumerWidget {
           ),
 
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
+                // ── Shareable summary card ──────────────────────────────
+                const SizedBox(height: AppSpacing.lg),
+                RepaintBoundary(
+                  key: _shareCardKey,
+                  child: _SummaryCard(
+                    name: fullName ?? 'User',
+                    joinedDate: joinedDate,
+                    habitTypes: habitTypes,
+                    badgeCount: earnedBadgeCount,
+                    totalSaved: totalSaved,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SizedBox(
+                  key: _shareButtonKey,
+                  width: double.infinity,
+                  child: AppButton(
+                    label: 'Share your journey',
+                    icon: const Icon(Icons.ios_share, size: 18, color: Colors.white),
+                    onPressed: _shareSummary,
+                  ),
+                ),
+
                 // ── Personal info ─────────────────────────────────────
                 const SizedBox(height: AppSpacing.lg),
                 _SectionHeader(title: 'Personal details'),
@@ -107,54 +203,51 @@ class ProfileScreen extends ConsumerWidget {
                     _InfoRow(
                       icon: Icons.cake_rounded,
                       label: 'Date of birth',
-                      value: DateFormat('d MMM yyyy').format(dob),
+                      value: _dateFmt.format(dob),
                     ),
                   if (dob != null && age != null)
-                    _InfoRow(
-                      icon: Icons.person_rounded,
-                      label: 'Age',
-                      value: '$age years',
-                    ),
+                    _InfoRow(icon: Icons.person_rounded, label: 'Age', value: '$age years'),
                   if (gender != null)
                     _InfoRow(
                       icon: Icons.wc_rounded,
                       label: 'Gender',
                       value: _genderLabel[gender] ?? gender,
+                    ),
+                  if (joinedDate != null)
+                    _InfoRow(
+                      icon: Icons.calendar_today_rounded,
+                      label: 'Joined',
+                      value: _dateFmt.format(joinedDate),
                       isLast: true,
                     ),
-                  if (dob == null && gender == null)
+                  if (dob == null && gender == null && joinedDate == null)
                     const _EmptyRow(message: 'Personal details not filled'),
                 ]),
 
-                // ── Habit info ────────────────────────────────────────
+                // ── Habit(s) summary ────────────────────────────────────
                 const SizedBox(height: AppSpacing.lg),
-                _SectionHeader(title: 'Habit details'),
+                _SectionHeader(title: 'Habit(s) summary'),
                 const SizedBox(height: AppSpacing.sm),
                 _InfoCard(children: [
-                  if (habitType != null)
+                  for (final type in habitTypes)
                     _InfoRow(
                       icon: Icons.local_fire_department_rounded,
-                      label: 'Habit',
-                      value:
-                          '${_habitEmoji[habitType] ?? '🔥'}  ${habitType.replaceAll('_', ' ')}',
+                      label: habitDisplayInfo[type]!.label,
+                      value: habitDetails[type] != null
+                          ? '${habitDetails[type]!.dailyQty} ${habitDisplayInfo[type]!.unit}/day'
+                          : '—',
                     ),
-                  if (dailyQty != null && unitCost != null)
-                    _InfoRow(
-                      icon: Icons.repeat_rounded,
-                      label: 'Daily usage',
-                      value: '$dailyQty × ₹${unitCost.toStringAsFixed(0)}',
-                    ),
-                  if (dailySpend != null)
+                  if (habitTypes.isNotEmpty)
                     _InfoRow(
                       icon: Icons.currency_rupee_rounded,
                       label: 'Daily spend',
-                      value: '₹${dailySpend.toStringAsFixed(0)}',
+                      value: _currencyFmt.format(totalDailySpend),
                     ),
                   if (quitDate != null)
                     _InfoRow(
                       icon: Icons.flag_rounded,
                       label: 'Quit date',
-                      value: DateFormat('d MMM yyyy').format(quitDate),
+                      value: _dateFmt.format(quitDate),
                     ),
                   if (daysQuit != null && daysQuit > 0)
                     _InfoRow(
@@ -163,23 +256,44 @@ class ProfileScreen extends ConsumerWidget {
                       value: '$daysQuit days',
                       isLast: true,
                     ),
-                  if (habitType == null)
+                  if (habitTypes.isEmpty)
                     const _EmptyRow(message: 'Habit data not filled'),
                 ]),
 
-                // ── Actions ───────────────────────────────────────────
+                // ── Settings ────────────────────────────────────────────
                 const SizedBox(height: AppSpacing.lg),
-                _SectionHeader(title: 'Account'),
+                _SectionHeader(title: 'Settings'),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: 'Notification Preferences',
+                  variant: AppButtonVariant.outline,
+                  onPressed: () => context.push('/notification-preferences'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: 'Edit Habits',
+                  variant: AppButtonVariant.outline,
+                  onPressed: () => context.push('/edit-habits'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: 'My Badges',
+                  variant: AppButtonVariant.outline,
+                  onPressed: () => context.push('/badges'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: 'Community',
+                  variant: AppButtonVariant.outline,
+                  onPressed: () => context.push('/community'),
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 AppButton(
                   label: 'Sign Out',
                   variant: AppButtonVariant.outline,
                   isLoading: false,
-                  onPressed: isLoading
-                      ? null
-                      : () => ref
-                          .read(authNotifierProvider.notifier)
-                          .signOut(),
+                  onPressed:
+                      isLoading ? null : () => ref.read(authNotifierProvider.notifier).signOut(),
                 ),
 
                 // ── Danger zone ───────────────────────────────────────
@@ -196,8 +310,7 @@ class ProfileScreen extends ConsumerWidget {
                     children: [
                       const Row(
                         children: [
-                          Icon(Icons.warning_amber_rounded,
-                              color: AppColors.error, size: 18),
+                          Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 18),
                           SizedBox(width: 8),
                           Text(
                             'Danger zone',
@@ -226,24 +339,15 @@ class ProfileScreen extends ConsumerWidget {
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.error,
-                            side: const BorderSide(
-                                color: AppColors.error, width: 1.5),
+                            side: const BorderSide(color: AppColors.error, width: 1.5),
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.md),
-                            ),
+                            shape:
+                                RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
                           ),
-                          onPressed: isLoading
-                              ? null
-                              : () => _confirmDelete(context, ref),
+                          onPressed: isLoading ? null : () => _confirmDelete(context),
                           child: const Text(
                             'Delete Account',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
-                            ),
+                            style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 15),
                           ),
                         ),
                       ),
@@ -259,37 +363,87 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
   }
+}
 
-  void _confirmDelete(BuildContext context, WidgetRef ref) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.xl)),
-        title: const Text(
-          'Delete your account?',
-          style: TextStyle(
-              fontFamily: 'Inter', fontWeight: FontWeight.w700, fontSize: 18),
-        ),
-        content: const Text(
-          'This permanently deletes your account and all your data. This cannot be undone.',
-          style: TextStyle(
-              fontFamily: 'Inter', fontSize: 14, color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary)),
+// ── Shareable summary card ──────────────────────────────────────────────────
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.name,
+    required this.joinedDate,
+    required this.habitTypes,
+    required this.badgeCount,
+    required this.totalSaved,
+  });
+
+  final String name;
+  final DateTime? joinedDate;
+  final List<HabitType> habitTypes;
+  final int badgeCount;
+  final double totalSaved;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            name,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textPrimary,
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              ref.read(authNotifierProvider.notifier).deleteAccount();
-            },
-            child: const Text('Delete',
-                style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(
+            joinedDate != null ? 'Joined ${_dateFmt.format(joinedDate!)}' : 'Welcome to Pravaan',
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          if (habitTypes.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final type in habitTypes)
+                  Text(
+                    '${habitDisplayInfo[type]!.emoji} ${habitDisplayInfo[type]!.label}',
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          const Divider(height: 1, color: AppColors.outlineVariant),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryStat(emoji: '🏅', label: 'Badges earned', value: '$badgeCount'),
+              ),
+              Expanded(
+                child: _SummaryStat(
+                  emoji: '💰',
+                  label: 'Total saved',
+                  value: _currencyFmt.format(totalSaved),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -297,14 +451,33 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-int _ageFrom(DateTime dob) {
-  final now = DateTime.now();
-  int age = now.year - dob.year;
-  if (now.month < dob.month ||
-      (now.month == dob.month && now.day < dob.day)) {
-    age--;
+class _SummaryStat extends StatelessWidget {
+  const _SummaryStat({required this.emoji, required this.label, required this.value});
+  final String emoji, label, value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 18)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(fontFamily: 'Inter', fontSize: 11, color: AppColors.textSecondary),
+        ),
+      ],
+    );
   }
-  return age;
 }
 
 // ── Profile header ────────────────────────────────────────────────────────────
@@ -455,8 +628,7 @@ class _InfoRow extends StatelessWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 14),
           child: Row(
             children: [
               Icon(icon, color: AppColors.primary, size: 20),
@@ -483,8 +655,7 @@ class _InfoRow extends StatelessWidget {
             ],
           ),
         ),
-        if (!isLast)
-          const Divider(height: 1, indent: 48, color: AppColors.outlineVariant),
+        if (!isLast) const Divider(height: 1, indent: 48, color: AppColors.outlineVariant),
       ],
     );
   }

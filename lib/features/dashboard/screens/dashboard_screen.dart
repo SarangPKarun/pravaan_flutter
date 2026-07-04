@@ -106,6 +106,13 @@ class DashboardScreen extends ConsumerWidget {
                     orElse: () => null,
                   ),
                 ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.push('/insights/savings'),
+                    child: const Text('View full insights →'),
+                  ),
+                ),
 
                 const SizedBox(height: 20),
 

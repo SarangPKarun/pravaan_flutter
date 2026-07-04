@@ -2,11 +2,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/badges.dart';
 import 'core/constants/app_constants.dart';
 import 'core/local/hive_service.dart';
 import 'core/router/app_router.dart';
 import 'core/supabase_client.dart';
 import 'core/theme.dart';
+import 'features/badges/providers/badge_provider.dart';
 import 'features/notifications/services/local_notification_service.dart';
 import 'features/notifications/services/push_notification_service.dart';
 import 'features/streak/providers/streak_provider.dart';
@@ -45,6 +47,19 @@ class MyApp extends ConsumerWidget {
     for (final wallet in walletsAsync.value ?? const []) {
       LocalNotificationService.notifyWalletMilestoneIfCrossed(wallet);
     }
+    if (walletsAsync.value != null) {
+      final totalSavings = ref.watch(totalSavingsProvider);
+      ref.read(badgeAwardProvider.notifier).checkThresholds(savingsAmount: totalSavings);
+    }
+
+    // Pushes the celebration screen whenever a new badge becomes the one
+    // awaiting celebration — fires for the first unlock and, after the
+    // screen calls `dismiss()`, again for each subsequently queued one.
+    ref.listen<BadgeModel?>(badgeAwardProvider, (previous, next) {
+      if (next != null && next != previous) {
+        router.push('/badge-celebration', extra: next);
+      }
+    });
 
     return MaterialApp.router(
       title: AppConstants.appName,

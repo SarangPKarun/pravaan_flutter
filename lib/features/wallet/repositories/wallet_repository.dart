@@ -198,6 +198,29 @@ class WalletRepository {
       return Err(e.toString());
     }
   }
+
+  /// Returns every wallet credit across all of [userId]'s habits/wallets,
+  /// oldest first — the basis for a cumulative savings-over-time chart.
+  Future<Result<List<WalletCreditModel>, String>> getAllCreditHistory(
+    String userId,
+  ) async {
+    try {
+      final rows = await _client
+          .from('wallet_credits')
+          .select()
+          .eq('user_id', userId)
+          .order('credit_date', ascending: true);
+      return Ok(
+        rows
+            .map((r) => WalletCreditModel.fromJson(Map<String, dynamic>.from(r)))
+            .toList(),
+      );
+    } on PostgrestException catch (e) {
+      return Err(e.message);
+    } catch (e) {
+      return Err(e.toString());
+    }
+  }
 }
 
 final walletRepositoryProvider = Provider<WalletRepository>(

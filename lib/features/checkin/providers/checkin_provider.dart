@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/local/hive_service.dart';
 import '../../../core/supabase_client.dart';
+import '../../badges/providers/badge_provider.dart';
 import '../../streak/models/streak_stats.dart';
 import '../../streak/providers/streak_provider.dart';
 import '../../streak/repositories/streak_repository.dart';
@@ -59,6 +60,12 @@ class CheckinNotifier extends Notifier<CheckinState> {
 
       // 2. Persist to Hive immediately — UI updates without waiting for network.
       ref.read(streakProvider.notifier).updateStats(newStats);
+
+      // 2b. Check for newly-earned day-count/streak badges against the fresh stats.
+      await ref.read(badgeAwardProvider.notifier).checkThresholds(
+            dayCount: newStats.totalCleanDays,
+            streakLength: newStats.currentStreak,
+          );
 
       // 3. Flush previously queued items before adding new ones.
       await _flushPendingSync(client);

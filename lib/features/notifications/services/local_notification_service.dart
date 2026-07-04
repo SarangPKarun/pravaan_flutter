@@ -4,6 +4,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../../../core/badges.dart';
 import '../../../core/local/hive_service.dart';
 import '../../wallet/models/goal_wallet_model.dart';
 
@@ -24,6 +25,14 @@ abstract final class LocalNotificationService {
     'wallet_milestones',
     'Savings milestones',
     channelDescription: 'Celebrates progress toward your savings goals',
+    importance: Importance.high,
+    priority: Priority.high,
+  );
+
+  static const _badgeChannel = AndroidNotificationDetails(
+    'badges_earned',
+    'Badges earned',
+    channelDescription: 'Celebrates newly unlocked achievement badges',
     importance: Importance.high,
     priority: Priority.high,
   );
@@ -56,11 +65,21 @@ abstract final class LocalNotificationService {
     );
   }
 
-  /// Cancels both evening reminders if [isCheckedInToday]; otherwise
-  /// (re)schedules whichever of today's 9 PM / 10 PM windows haven't passed
-  /// yet. Safe to call repeatedly — always cancels before rescheduling.
+  static const _remindersEnabledKey = 'checkin_reminders_enabled';
+
+  /// Whether the user wants daily check-in reminders. Defaults to on.
+  static bool get remindersEnabled =>
+      (HiveService.settingsBox.get(_remindersEnabledKey) as bool?) ?? true;
+
+  static Future<void> setRemindersEnabled(bool enabled) =>
+      HiveService.settingsBox.put(_remindersEnabledKey, enabled);
+
+  /// Cancels both evening reminders if reminders are disabled or
+  /// [isCheckedInToday]; otherwise (re)schedules whichever of today's 9 PM /
+  /// 10 PM windows haven't passed yet. Safe to call repeatedly — always
+  /// cancels before rescheduling.
   static Future<void> syncCheckinReminders(bool isCheckedInToday) async {
-    if (isCheckedInToday) {
+    if (!remindersEnabled || isCheckedInToday) {
       await _plugin.cancel(id: _checkinReminderId);
       await _plugin.cancel(id: _streakAtRiskId);
       return;
@@ -125,6 +144,16 @@ abstract final class LocalNotificationService {
           ? '"${wallet.goalName}" is fully funded — time to claim it!'
           : 'You\'re $newTier% of the way to "${wallet.goalName}".',
       notificationDetails: const NotificationDetails(android: _milestoneChannel),
+    );
+  }
+
+  /// Fires an immediate celebration notification for a newly earned badge.
+  static Future<void> notifyBadgeEarned(BadgeModel badge) async {
+    await _plugin.show(
+      id: badge.id.hashCode,
+      title: 'Badge unlocked! 🏅',
+      body: '${badge.name} — ${badge.description}',
+      notificationDetails: const NotificationDetails(android: _badgeChannel),
     );
   }
 }

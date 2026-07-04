@@ -218,6 +218,40 @@ select cron.schedule(
   $$
 );
 
+-- ── Badges (achievement unlocks) ────────────────────────────────────────────
+
+create table public.user_badges (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  badge_id   text not null,
+  earned_at  timestamptz not null default now(),
+  unique (user_id, badge_id)
+);
+
+alter table public.user_badges enable row level security;
+
+create policy "Users can manage own badges"
+  on public.user_badges for all
+  using (auth.uid() = user_id);
+
+-- ── AI product recommendations (cache) ──────────────────────────────────────
+
+create table public.ai_product_recommendations (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  categories    text[] not null,
+  generated_at  timestamptz not null default now()
+);
+
+create index ai_product_recommendations_user_id_generated_at_idx
+  on public.ai_product_recommendations (user_id, generated_at desc);
+
+alter table public.ai_product_recommendations enable row level security;
+
+create policy "Users can manage own product recommendations"
+  on public.ai_product_recommendations for all
+  using (auth.uid() = user_id);
+
 -- ── Migration for existing databases ─────────────────────────────────────────
 -- alter table public.checkins
 --   add column craving_trigger text check (craving_trigger in ('stress','boredom','social','other')),
